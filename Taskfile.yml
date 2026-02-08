@@ -1,0 +1,110 @@
+version: "3"
+
+vars:
+  BINARY_NAME: vault
+  MAIN_PATH: ./cmd/vault
+  BUILD_DIR: ./bin
+  VERSION: 0.1.0
+  LDFLAGS: -X github.com/Akshay2642005/vault/internal/config.Version={{.VERSION}}
+
+tasks:
+  # -------------------------------------------------
+  # Default / Help
+  # -------------------------------------------------
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # -------------------------------------------------
+  # Build
+  # -------------------------------------------------
+  build:
+    desc: Build the binary
+    cmds:
+      - echo "Building {{.BINARY_NAME}}..."
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}{{exeExt}} {{.MAIN_PATH}}
+  
+  build-all:
+    desc: Build for all platforms
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - GOOS=linux   GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-amd64 {{.MAIN_PATH}}
+      - GOOS=linux   GOARCH=arm64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-arm64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-amd64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=arm64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-arm64 {{.MAIN_PATH}}
+      - GOOS=windows GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-windows-amd64.exe {{.MAIN_PATH}}
+
+  # -------------------------------------------------
+  # Run
+  # -------------------------------------------------
+  run:
+    desc: Build and run the application
+    deps: [build]
+    cmds:
+      - "{{fromSlash .BUILD_DIR}}/{{.BINARY_NAME}}{{exeExt}}"
+
+  # -------------------------------------------------
+  # Test
+  # -------------------------------------------------
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+
+  test-coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./internal/crypto/...
+
+  # -------------------------------------------------
+  # Formatting & lint
+  # -------------------------------------------------
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - |
+        golangci-lint run ./...
+    preconditions:
+      - sh: command -v golangci-lint
+        msg: "golangci-lint not installed"
+
+  # -------------------------------------------------
+  # Dependencies
+  # -------------------------------------------------
+  deps:
+    desc: Download and tidy dependencies
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  # -------------------------------------------------
+  # Docker
+  # -------------------------------------------------
+  docker-build:
+    desc: Build Docker image
+    cmds:
+      - docker build -t vault:{{.VERSION}} .
+      - docker tag vault:{{.VERSION}} vault:latest
+
+  # -------------------------------------------------
+  # Clean
+  # -------------------------------------------------
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -f coverage.out coverage.html
+
