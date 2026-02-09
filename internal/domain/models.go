@@ -9,6 +9,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 )
@@ -207,8 +208,9 @@ func ValidateSecretValue(value string) error {
 }
 
 func NewSecret(
-	projectId, environment, key, value, createdBy string,
+	projectId, environment, key, value string,
 	secretType SecretType,
+	createdBy string,
 ) (*Secret, error) {
 	if err := ValidateSecretKey(key); err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
@@ -279,7 +281,7 @@ func (s *Secret) SecretPath() string {
 	return fmt.Sprintf("%s%s%s", s.ProjectID, s.Environment, s.Key)
 }
 
-func (s *Secret) isExpired() bool {
+func (s *Secret) IsExpired() bool {
 	if s.ExpiresAt == nil {
 		return false
 	}
@@ -303,9 +305,7 @@ func (s *Secret) Clone() *Secret {
 
 	if s.Metadata != nil {
 		clone.Metadata = make(map[string]any)
-		for k, v := range s.Metadata {
-			clone.Metadata[k] = v
-		}
+		maps.Copy(clone.Metadata, s.Metadata)
 	}
 
 	if s.Permissions != nil {

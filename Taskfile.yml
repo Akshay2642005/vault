@@ -5,7 +5,8 @@ vars:
   MAIN_PATH: ./cmd/vault
   BUILD_DIR: ./bin
   VERSION: 0.1.0
-  LDFLAGS: -X github.com/Akshay2642005/vault/internal/config.Version={{.VERSION}}
+  LDFLAGS: -X vault/internal/config.Version={{.VERSION}}
+  SQLITE_TAGS: sqlite_fts5
 
 tasks:
   # -------------------------------------------------
@@ -24,17 +25,17 @@ tasks:
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BUILD_DIR}}
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}{{exeExt}} {{.MAIN_PATH}}
+      - GOOS=windows GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault.exe {{.MAIN_PATH}}
   
   build-all:
     desc: Build for all platforms
     cmds:
       - mkdir -p {{.BUILD_DIR}}
-      - GOOS=linux   GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-amd64 {{.MAIN_PATH}}
-      - GOOS=linux   GOARCH=arm64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-arm64 {{.MAIN_PATH}}
-      - GOOS=darwin  GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-amd64 {{.MAIN_PATH}}
-      - GOOS=darwin  GOARCH=arm64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-arm64 {{.MAIN_PATH}}
-      - GOOS=windows GOARCH=amd64 go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-windows-amd64.exe {{.MAIN_PATH}}
+      - GOOS=linux   GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-amd64 {{.MAIN_PATH}}
+      - GOOS=linux   GOARCH=arm64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-arm64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-amd64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=arm64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-arm64 {{.MAIN_PATH}}
+      - GOOS=windows GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-windows-amd64.exe {{.MAIN_PATH}}
 
   # -------------------------------------------------
   # Run
@@ -43,7 +44,7 @@ tasks:
     desc: Build and run the application
     deps: [build]
     cmds:
-      - "{{fromSlash .BUILD_DIR}}/{{.BINARY_NAME}}{{exeExt}}"
+      - "{{.BUILD_DIR}}/vault{{exeExt}}"
 
   # -------------------------------------------------
   # Test
