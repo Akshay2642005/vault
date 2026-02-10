@@ -1,12 +1,15 @@
 # .goreleaser.yaml
-# GoReleaser configuration for Vault CLI
+version: 2
 
 project_name: vault
 
+before:
+  hooks:
+    - go mod tidy
+
 builds:
-  - id: vault
-    main: ./cmd/vault/main.go
-    binary: vault
+  - env:
+      - CGO_ENABLED=0
     goos:
       - linux
       - windows
@@ -14,59 +17,38 @@ builds:
     goarch:
       - amd64
       - arm64
-    env:
-      - CGO_ENABLED=0
+    main: ./cmd/vault/main.go
+    binary: vault
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
 
 archives:
-  - id: vault-archive
-    builds:
-      - vault
-    format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
-      - AGENTS.md
-      - DOCUMENTATION.md
-      - docker-compose.yml
+  - formats:
+      - tar.gz
+    # Name template to match install.sh expectation: vault_1.0.0_linux_amd64.tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
 
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
 changelog:
-  sort: desc
+  sort: asc
   filters:
     exclude:
       - "^docs:"
       - "^test:"
       - "^chore:"
-
-release:
-  github:
-    owner: Akshay2642005
-    name: vault
-
-brews:
-  - name: vault
-    homepage: "https://github.com/Akshay2642005/vault"
-    description: "A secure, multi-environment secret management CLI with encryption at rest."
-    test: |
-      vault --version
-
-snapshot:
-  name_template: "{{ .ProjectName }}-dev-{{ .ShortCommit }}"
-
-signs:
-  - cmd: gpg
-    args: ["--detach-sign"]
-
-EnvFiles:
-  - .env
-# Hooks for custom scripts (optional)
-# hooks:
-#   pre:
-#     - go mod tidy
-#   post:
-#     - echo "Release complete!"
