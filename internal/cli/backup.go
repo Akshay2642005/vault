@@ -1,0 +1,224 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/cobra"
+	"vault/internal/config"
+	"vault/internal/storage/sqlite"
+)
+
+var (
+	backupOutput string
+	restoreForce bool
+)
+
+// NewBackupCmd creates the backup command
+func NewBackupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backup",
+		Short: "Create a backup of the vault",
+		Long: `Create a complete backup of the vault database.
+
+The backup is a copy of the encrypted database file,
+so it's safe to store but requires the master password to restore.
+
+Examples:
+  vault backup                           # Creates timestamped backup
+  vault backup --output vault-backup.db  # Custom filename`,
+		RunE: runBackup,
+	}
+
+	cmd.Flags().StringVarP(&backupOutput, "output", "o", "", "Output filename (default: vault-backup-YYYYMMDD-HHMMSS.db)")
+
+	return cmd
+}
+
+func runBackup(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	// Get storage configuration
+	cfg := config.GetStorageConfig()
+
+	// Create storage backend
+	backend, err := sqlite.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create storage backend: %w", err)
+	}
+	defer backend.Close()
+
+	// Initialize backend
+	if err := backend.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to initialize backend: %w", err)
+	}
+
+	// Verify vault exists
+	initialized, err := backend.IsInitialized(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check vault: %w", err)
+	}
+	if !initialized {
+		return fmt.Errorf("vault not initialized")
+	}
+
+	// Determine output filename
+	if backupOutput == "" {
+		timestamp := time.Now().Format("20060102-150405")
+		backupOutput = fmt.Sprintf("vault-backup-%s.db", timestamp)
+	}
+
+	// Create backup directory if needed
+	backupDir := filepath.Dir(backupOutput)
+	if backupDir != "." && backupDir != "" {
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+			return fmt.Errorf("failed to create backup directory: %w", err)
+		}
+	}
+
+	// Read source database
+	sourceData, err := os.ReadFile(cfg.Path)
+	if err != nil {
+		return fmt.Errorf("failed to read vault database: %w", err)
+	}
+
+	// Write backup
+	if err := os.WriteFile(backupOutput, sourceData, 0o600); err != nil {
+		return fmt.Errorf("failed to write backup: %w", err)
+	}
+
+	fileInfo, _ := os.Stat(backupOutput)
+	size := float64(fileInfo.Size()) / 1024 // KB
+
+	fmt.Printf("✓ Backup created: %s (%.2f KB)\n", backupOutput, size)
+	fmt.Println("\nBackup is encrypted and requires your master password to restore.")
+	fmt.Println("Store it securely!")
+
+	return nil
+}
+
+// NewRestoreCmd creates the restore command
+func NewRestoreCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "restore <backup-file>",
+		Short: "Restore vault from a backup",
+		Long: `Restore the vault from a backup file.
+
+⚠ WARNING: This will replace your current vault!
+Use --force to confirm the restore operation.
+
+Examples:
+  vault restore vault-backup-20240208.db --force`,
+		Args: cobra.ExactArgs(1),
+		RunE: runRestore,
+	}
+
+	cmd.Flags().BoolVar(&restoreForce, "force", false, "Force restore without confirmation (required)")
+	cmd.MarkFlagRequired("force")
+
+	return cmd
+}
+
+func runRestore(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	backupFile := args[0]
+
+	// Verify backup file exists
+	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+		return fmt.Errorf("backup file not found: %s", backupFile)
+	}
+
+	// Get storage configuration
+	cfg := config.GetStorageConfig()
+
+	// Create storage backend
+	backend, err := sqlite.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create storage backend: %w", err)
+	}
+	defer backend.Close()
+
+	// Initialize backend
+	if err := backend.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to initialize backend: %w", err)
+	}
+
+	// Check if current vault exists
+	currentExists, err := backend.IsInitialized(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check current vault: %w", err)
+	}
+
+	if currentExists {
+		fmt.Println("⚠ WARNING: This will replace your current vault!")
+		fmt.Println("Current vault will be backed up to vault.db.pre-restore")
+
+		if !restoreForce {
+			return fmt.Errorf("use --force to confirm restore")
+		}
+
+		// Backup current vault
+		currentData, err := os.ReadFile(cfg.Path)
+		if err != nil {
+			return fmt.Errorf("failed to read current vault: %w", err)
+		}
+
+		preRestoreBackup := cfg.Path + ".pre-restore"
+		if err := os.WriteFile(preRestoreBackup, currentData, 0o600); err != nil {
+			return fmt.Errorf("failed to backup current vault: %w", err)
+		}
+
+		fmt.Printf("✓ Current vault backed up to: %s\n\n", preRestoreBackup)
+	}
+
+	// Read backup file
+	backupData, err := os.ReadFile(backupFile)
+	if err != nil {
+		return fmt.Errorf("failed to read backup file: %w", err)
+	}
+
+	// Write to vault location
+	if err := os.WriteFile(cfg.Path, backupData, 0o600); err != nil {
+		return fmt.Errorf("failed to restore vault: %w", err)
+	}
+
+	// Verify restored vault
+	fmt.Println("Verifying restored vault...")
+
+	password, err := promptPassword()
+	if err != nil {
+		return err
+	}
+
+	backend2, err := sqlite.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to verify: %w", err)
+	}
+	defer backend2.Close()
+
+	if err := backend2.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to verify: %w", err)
+	}
+
+	if _, err := backend2.UnlockVault(ctx, password); err != nil {
+		return fmt.Errorf("restored vault verification failed: %w\nYour original vault is at: %s.pre-restore", err, cfg.Path)
+	}
+
+	// Count projects
+	projects, err := backend2.ListProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list projects: %w", err)
+	}
+
+	fmt.Printf("\n✓ Vault restored successfully!\n")
+	fmt.Printf("  Projects: %d\n", len(projects))
+
+	if currentExists {
+		fmt.Printf("\nYour previous vault is backed up at:\n  %s.pre-restore\n", cfg.Path)
+	}
+
+	return nil
+}
