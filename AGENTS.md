@@ -69,6 +69,15 @@ See the file for configuration details and CI/CD integration.
 - task build - Alternative build command
 - task test - Alternative test command
 - task --list - Show all available tasks
+- task bench - Run benchmarks
+- task build-all - Build for all platforms
+- task clean - Clean build artifacts
+- task deps - Download and tidy dependencies
+- task docker-build - Build Docker image
+- task fmt - Format code
+- task lint - Run golangci-lint
+- task run - Build and run the application
+- task test-coverage - Run tests with coverage report
 
 ## Coding Style & Naming Conventions
 
@@ -81,7 +90,7 @@ See the file for configuration details and CI/CD integration.
 
 ## Environment Aliasing
 
-Vault supports both canonical and short aliases for environments in all commands. This means you can use either the full name or its alias, and Vault will always map it to the correct environment internally.
+Vault supports both canonical and short aliases for environments in all commands. You can use either the full name or its alias, and Vault will always map it to the correct environment internally.
 
 | Alias | Canonical Name |
 |-------|---------------|
@@ -93,7 +102,7 @@ Vault supports both canonical and short aliases for environments in all commands
 `vault get myapp/dev/API_KEY` and `vault get myapp/development/API_KEY` are equivalent.
 
 **Note:**  
-All lookups and storage use the canonical environment names (`development`, `staging`, `production`). Aliases are only for user convenience.
+All lookups and storage use the canonical environment names (`development`, `staging`, `production`). Aliases are only for user convenience. All commands that accept an environment argument (get, set, list, import, export, run, etc.) now normalize input to canonical names.
 
 
 ## Testing Guidelines
@@ -125,14 +134,15 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - Clear description of changes and rationale
 - Link related issues
 - Add tests for new functionality
-- Ensure make lint and make test pass
+- Ensure `make lint` and `make test` pass
 - Update documentation as needed
 - Follow existing code style and patterns
+- Ensure new commands and aliases are documented and tested
 
 **Example PR workflow**:
 1. Create feature branch from master
 2. Make changes with clear commits
-3. Run make test and make lint
+3. Run `make test` and `make lint`
 4. Submit PR with description and testing notes
 5. Address review feedback
 6. Merge after approval
@@ -153,13 +163,15 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - Secret rotation and versioning
 - Sync status tracking
 - SQLite storage with encryption at rest
+- Command aliases for usability (ls, pr, rm, dev, prod, stage)
+- `run` command for executing processes with secrets injected
 
 ## Getting Started
 
 1. **Clone and setup**: git clone https://github.com/Akshay2642005/vault.git
 2. **Install dependencies**: make deps
 3. **Build**: make build
-4. **Run**: make run or in/vault.exe
+4. **Run**: make run or bin/vault.exe
 5. **Develop**: make dev for live reload (install air first)
 6. **Contribute**: Pick an issue, create tests, implement features
 
@@ -168,6 +180,7 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - Write unit tests for domain models
 - Implement storage layer functionality
 - Add encryption utilities
+- Add or improve documentation for new commands and aliases
 
 ---
 
@@ -176,7 +189,9 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - **Environment aliasing**: All commands accept both canonical and alias environment names.
 - **Password refactor**: Centralized password logic for all prompts and validation in `internal/auth/password.go`.
 - **Project deletion**: New `project delete` and `project rm` commands.
-- **Command aliases**: Added `ls`, `pr`, `rm` for common commands.
+- **Command aliases**: Added `ls`, `pr`, `rm` for common commands and environments (dev, prod, stage).
+- **Run command**: New `vault run <project>/<environment> -- <command>` for running commands with secrets injected into the environment. This replaces the previous `env --exec` usage.
+- **Deprecated**: The `vault env` command is no longer registered; use `vault run` instead.
 - **Docker Compose**: PostgreSQL 16 service for local development.
 - **GoReleaser**: Automated build and release configuration.
 
@@ -189,6 +204,8 @@ All password prompts, validation, and confirmation logic have been centralized i
 - Consistent password rules (minimum 8 characters, etc.)
 - Secure, non-echoed input for all password prompts
 - Centralized error handling and messaging
+
+All CLI commands that previously prompted for passwords now use these utilities.
 
 **Affected Commands:**  
 - `init`
@@ -228,6 +245,22 @@ To improve usability, Vault CLI now supports the following command aliases:
 You can use either the full command or its alias interchangeably.
 
 ---
+
+## Running Commands with Secrets (`run` Command)
+
+The `run` command allows you to execute any shell command with secrets loaded for a given project/environment:
+
+```sh
+vault run myapp/dev -- npm run dev
+vault run myapp/production -- python app.py
+```
+
+- Secrets are injected into the child process environment.
+- Handles shell detection and signal forwarding.
+- Use aliases or canonical environment names (`dev` or `development`).
+
+**Note:**  
+The previous `vault env` command is deprecated and no longer registered. Use `vault run` for all new workflows.
 
 ## Infrastructure: Docker Compose & GoReleaser
 

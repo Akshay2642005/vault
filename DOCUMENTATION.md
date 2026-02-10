@@ -13,6 +13,7 @@ Vault is a Go-based secret management CLI that provides secure, multi-environmen
 - [Project Deletion Command](#project-deletion-command)
 - [Command Aliases](#command-aliases)
 - [Infrastructure: Docker Compose & GoReleaser](#infrastructure-docker-compose--goreleaser)
+- [Run Command](#run-command)
 - [Usage Examples](#usage-examples)
 - [Contributing](#contributing)
 - [Changelog](#changelog)
@@ -50,6 +51,24 @@ All password prompts, validation, and confirmation logic have been centralized i
 - `project create`
 - `project delete`
 - Any command requiring vault unlock
+
+---
+
+## Run Command
+
+The `run` command allows you to execute any shell command with secrets loaded for a given project/environment:
+
+```sh
+vault run myapp/dev -- npm run dev
+vault run myapp/production -- python app.py
+```
+
+- Secrets are injected into the child process environment.
+- Handles shell detection and signal forwarding.
+- Use aliases or canonical environment names (`dev` or `development`).
+
+**Note:**  
+The previous `vault env` command is deprecated and no longer registered. Use `vault run` for all new workflows.
 
 ---
 
@@ -139,6 +158,13 @@ vault list myapp/prod
 vault ls myapp/dev
 ```
 
+### Run a Command with Secrets
+
+```sh
+vault run myapp/dev -- npm run dev
+vault run myapp/production -- python app.py
+```
+
 ### Delete a Project
 
 ```sh
@@ -165,6 +191,8 @@ vault pr rm myapp
 - **Password refactor**: Centralized password logic for all prompts and validation.
 - **Project deletion**: New `project delete` and `project rm` commands.
 - **Command aliases**: Added `ls`, `pr`, `rm` for common commands.
+- **Run command**: New `vault run <project>/<environment> -- <command>` for running commands with secrets injected.
+- **Deprecated**: The `vault env` command is no longer registered; use `vault run` instead.
 - **Docker Compose**: PostgreSQL 16 service for local development.
 - **GoReleaser**: Automated build and release configuration.
 

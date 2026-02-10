@@ -13,6 +13,7 @@
   - [Architecture Overview](#architecture-overview)
   - [Getting Started](#getting-started)
   - [Security & Configuration Tips](#security--configuration-tips)
+  - [Usage](#usage)
 
   ## Project Structure
 
@@ -35,6 +36,33 @@
   ## Build, Test, and Development Commands
 
   Use either Make or Task for build automation:
+
+  ## Usage
+
+  ### Running Commands with Secrets
+
+  Use the new `run` command to execute any command with secrets injected for a specific project/environment:
+
+  ```sh
+  vault run myapp/dev -- npm run dev
+  vault run myapp/production -- python app.py
+  ```
+
+  This replaces the previous `env --exec` usage. The `run` command handles shell detection, signal forwarding, and environment variable injection.
+
+  > **Note:** The `vault env` command is deprecated and no longer registered. Use `vault run` for all new workflows.
+
+  ### Environment Aliasing
+
+  You can use either canonical or alias names for environments in all commands:
+
+  | Alias | Canonical Name |
+  |-------|---------------|
+  | dev   | development   |
+  | prod  | production    |
+  | stage | staging       |
+
+  Example: `vault get myapp/dev/API_KEY` and `vault get myapp/development/API_KEY` are equivalent.
 
   **Make commands(Not Tested):**
   - `make build`: Build binary (`bin/vault.exe`).
@@ -69,6 +97,10 @@
   - **Code style**: Follow Go community conventions and effective Go guidelines.
   - **Naming**: Use camelCase for variables/functions, PascalCase for exported types.
   - **Imports**: Use `go mod tidy` to maintain clean imports.
+
+  ## Password Handling
+
+  All password prompts, validation, and confirmation logic have been centralized in `internal/auth/password.go`. All CLI commands now use these utilities for consistent and secure password handling.
 
   ## Testing Guidelines
 
@@ -145,3 +177,4 @@
   - **Environment variables**: Support for environment-based configuration.
   - **Security considerations**: All secrets are encrypted at rest.
   - **MFA support**: Production environments can require multi-factor authentication.
+
