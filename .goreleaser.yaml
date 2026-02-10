@@ -50,9 +50,6 @@ release:
 
 brews:
   - name: vault
-    tap:
-      owner: Akshay2642005
-      name: homebrew-tap
     homepage: "https://github.com/Akshay2642005/vault"
     description: "A secure, multi-environment secret management CLI with encryption at rest."
     test: |
@@ -65,7 +62,7 @@ signs:
   - cmd: gpg
     args: ["--detach-sign"]
 
-env_files:
+EnvFiles:
   - .env
 # Hooks for custom scripts (optional)
 # hooks:
