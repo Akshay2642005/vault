@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
 	"vault/internal/storage/sqlite"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -58,8 +59,9 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	projectName := parts[0]
-	environmentName := parts[1]
+	environmentInput := parts[1]
 	secretKey := parts[2]
+	environmentName := NormalizeEnvironment(environmentInput)
 
 	// Validate secret key
 	if err := domain.ValidateSecretKey(secretKey); err != nil {
@@ -124,7 +126,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Verify environment exists
+	// Verify environment exists (only canonical name)
 	found := false
 	for _, env := range project.Environments {
 		if env.Name == environmentName {
@@ -133,7 +135,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("environment '%s' not found in project '%s'", environmentName, projectName)
+		return fmt.Errorf("environment '%s' not found in project '%s'", environmentInput, projectName)
 	}
 
 	// Check if secret exists

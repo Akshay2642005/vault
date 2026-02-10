@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"vault/internal/config"
+	"vault/internal/domain"
 	"vault/internal/storage/sqlite"
+
+	"github.com/spf13/cobra"
 )
 
 // NewDeleteCmd creates the delete command
@@ -106,13 +108,100 @@ func NewProjectCmd() *cobra.Command {
 		RunE:  runProjectList,
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:     "delete <name>",
+		Short:   "Delete a project",
+		Aliases: []string{"rm"},
+		Args:    cobra.ExactArgs(1),
+		RunE:    runProjectDelete,
+	})
+
 	return cmd
 }
 
 func runProjectCreate(cmd *cobra.Command, args []string) error {
-	// Implementation for project creation
-	fmt.Printf("Creating project: %s\n", args[0])
-	fmt.Println("✓ Project created successfully")
+	ctx := context.Background()
+	projectName := args[0]
+
+	// Get storage configuration
+	cfg := config.GetStorageConfig()
+	backend, err := sqlite.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create storage backend: %w", err)
+	}
+	defer backend.Close()
+
+	if err := backend.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to initialize backend: %w", err)
+	}
+
+	// Prompt for password
+	password, err := promptPassword()
+	if err != nil {
+		return err
+	}
+
+	if _, err := backend.UnlockVault(ctx, password); err != nil {
+		return fmt.Errorf("failed to unlock vault: %w", err)
+	}
+
+	// Check if project exists
+	_, err = backend.GetProjectByName(ctx, projectName)
+	if err == nil {
+		return fmt.Errorf("project '%s' already exists", projectName)
+	}
+
+	// Create project
+	project, err := domain.NewProject(projectName, "", "system")
+	if err != nil {
+		return fmt.Errorf("failed to create project object: %w", err)
+	}
+	if err := backend.CreateProject(ctx, project); err != nil {
+		return fmt.Errorf("failed to create project: %w", err)
+	}
+
+	fmt.Printf("✓ Project '%s' created successfully\n", projectName)
+	return nil
+}
+
+func runProjectDelete(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	projectName := args[0]
+
+	// Get storage configuration
+	cfg := config.GetStorageConfig()
+	backend, err := sqlite.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create storage backend: %w", err)
+	}
+	defer backend.Close()
+
+	if err := backend.Initialize(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to initialize backend: %w", err)
+	}
+
+	// Prompt for password
+	password, err := promptPassword()
+	if err != nil {
+		return err
+	}
+
+	if _, err := backend.UnlockVault(ctx, password); err != nil {
+		return fmt.Errorf("failed to unlock vault: %w", err)
+	}
+
+	// Check if project exists
+	project, err := backend.GetProjectByName(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("project '%s' not found", projectName)
+	}
+
+	// Delete project
+	if err := backend.DeleteProject(ctx, project.ID); err != nil {
+		return fmt.Errorf("failed to delete project: %w", err)
+	}
+
+	fmt.Printf("✓ Project '%s' deleted successfully\n", projectName)
 	return nil
 }
 

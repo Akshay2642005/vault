@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"vault/internal/config"
 	"vault/internal/storage/sqlite"
+
+	"github.com/spf13/cobra"
 )
 
 // NewListCmd creates the list command
@@ -69,8 +70,9 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(parts) == 2 {
-		// List secrets in project/environment
-		return listSecrets(ctx, backend, parts[0], parts[1])
+		// Always use canonical environment name for lookup
+		envName := NormalizeEnvironment(parts[1])
+		return listSecrets(ctx, backend, parts[0], envName)
 	}
 
 	return fmt.Errorf("invalid argument format")
@@ -126,14 +128,10 @@ func listSecrets(ctx context.Context, backend *sqlite.Backend, projectName, envi
 		return fmt.Errorf("project not found: %w", err)
 	}
 
+	// Only use canonical environment name
 	secrets, err := backend.ListSecrets(ctx, project.ID, environmentName)
-	if err != nil {
-		return fmt.Errorf("failed to list secrets: %w", err)
-	}
-
-	if len(secrets) == 0 {
-		fmt.Printf("No secrets found in %s/%s\n", projectName, environmentName)
-		return nil
+	if err != nil || len(secrets) == 0 {
+		return fmt.Errorf("no secrets found in %s/%s", projectName, environmentName)
 	}
 
 	fmt.Printf("Secrets in %s/%s:\n\n", projectName, environmentName)

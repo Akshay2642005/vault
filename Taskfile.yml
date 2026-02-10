@@ -7,6 +7,7 @@ vars:
   VERSION: 0.1.0
   LDFLAGS: -X vault/internal/config.Version={{.VERSION}}
   SQLITE_TAGS: sqlite_fts5
+  INSTALL_DIR: ~/dev/tools/
 
 tasks:
   # -------------------------------------------------
@@ -109,3 +110,11 @@ tasks:
       - rm -rf {{.BUILD_DIR}}
       - rm -f coverage.out coverage.html
 
+  # -------------------------------------------------
+  # install
+  # -------------------------------------------------
+  install:
+    desc: Install vault
+    deps: [build]
+    cmds:
+      - cp {{.BUILD_DIR}}/vault.exe  {{.INSTALL_DIR}}

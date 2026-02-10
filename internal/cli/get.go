@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"vault/internal/config"
 	"vault/internal/storage/sqlite"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -47,7 +48,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 	}
 
 	projectName := parts[0]
-	environmentName := parts[1]
+	environmentName := NormalizeEnvironment(parts[1])
 	secretKey := parts[2]
 
 	// Get storage configuration
@@ -81,7 +82,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("project not found: %w", err)
 	}
 
-	// Get secret
+	// Get secret using canonical environment name
 	secret, err := backend.GetSecret(ctx, project.ID, environmentName, secretKey)
 	if err != nil {
 		return fmt.Errorf("secret not found: %w", err)

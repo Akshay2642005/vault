@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"vault/internal/config"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -44,6 +45,8 @@ across multiple backends with powerful Lua-based configuration.`,
 	rootCmd.AddCommand(NewDeleteCmd())
 	rootCmd.AddCommand(NewProjectCmd())
 	rootCmd.AddCommand(NewVersionCmd())
+	rootCmd.AddCommand(NewImportCmd())
+	rootCmd.AddCommand(NewExportCmd())
 
 	return rootCmd
 }
