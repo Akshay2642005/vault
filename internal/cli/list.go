@@ -22,8 +22,9 @@ Examples:
   vault list                    # list all projects
   vault list myapp              # list environments in myapp
   vault list myapp/prod         # list secrets in myapp/prod`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runList,
+		Aliases: []string{"ls"},
+		Args:    cobra.MaximumNArgs(1),
+		RunE:    runList,
 	}
 
 	return cmd

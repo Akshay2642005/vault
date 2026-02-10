@@ -90,9 +90,10 @@ func runDelete(cmd *cobra.Command, args []string) error {
 // NewProjectCmd creates the project command
 func NewProjectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "project",
-		Short: "Manage projects",
-		Long:  `Create, list, and manage projects.`,
+		Use:     "project",
+		Short:   "Manage projects",
+		Long:    `Create, list, and manage projects.`,
+		Aliases: []string{"pr"},
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -103,9 +104,10 @@ func NewProjectCmd() *cobra.Command {
 	})
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List all projects",
-		RunE:  runProjectList,
+		Use:     "list",
+		Short:   "List all projects",
+		Aliases: []string{"ls"},
+		RunE:    runProjectList,
 	})
 
 	cmd.AddCommand(&cobra.Command{
