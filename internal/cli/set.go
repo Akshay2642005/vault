@@ -3,17 +3,16 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var (
@@ -73,14 +72,12 @@ func runSet(cmd *cobra.Command, args []string) error {
 	if len(args) == 2 {
 		value = args[1]
 	} else {
-		// Prompt for value
-		fmt.Print("Enter secret value: ")
-		valueBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		// Prompt for value using centralized auth package
+		var err error
+		value, err = auth.PromptPassword("Enter secret value: ")
 		if err != nil {
-			return fmt.Errorf("failed to read value: %w", err)
+			return err
 		}
-		fmt.Println()
-		value = string(valueBytes)
 	}
 
 	if value == "" {
@@ -90,20 +87,15 @@ func runSet(cmd *cobra.Command, args []string) error {
 	// Get storage configuration
 	cfg := config.GetStorageConfig()
 
-	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	// Create storage backend using factory
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
 
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
-
-	// Unlock vault
-	password, err := promptPassword()
+	// Unlock vault using centralized auth package
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}
@@ -239,16 +231,6 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func promptPassword() (string, error) {
-	fmt.Print("Enter master password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return "", fmt.Errorf("failed to read password: %w", err)
-	}
-	fmt.Println()
-	return string(password), nil
 }
 
 func parseDuration(s string) (time.Duration, error) {

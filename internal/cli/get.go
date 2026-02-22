@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
@@ -62,7 +63,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}

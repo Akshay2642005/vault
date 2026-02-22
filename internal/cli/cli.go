@@ -7,6 +7,10 @@ import (
 
 	"vault/internal/config"
 
+	// Ensure storage backends are registered with the factory
+	_ "vault/internal/storage/postgres"
+	_ "vault/internal/storage/sqlite"
+
 	"github.com/spf13/cobra"
 )
 

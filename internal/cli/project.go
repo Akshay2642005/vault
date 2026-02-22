@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/domain"
 	"vault/internal/storage"
@@ -51,7 +52,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Vault password: ")
 	if err != nil {
 		return err
 	}
@@ -128,8 +129,8 @@ func runProjectCreate(cmd *cobra.Command, args []string) error {
 	}
 	defer backend.Close()
 
-	// Prompt for password
-	password, err := promptPassword()
+	// Prompt for password using centralized auth package
+	password, err := auth.PromptPassword("Vault password: ")
 	if err != nil {
 		return err
 	}
@@ -169,8 +170,8 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	}
 	defer backend.Close()
 
-	// Prompt for password
-	password, err := promptPassword()
+	// Prompt for password using centralized auth package
+	password, err := auth.PromptPassword("Vault password: ")
 	if err != nil {
 		return err
 	}
@@ -204,7 +205,7 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 	}
 	defer backend.Close()
 
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Vault password: ")
 	if err != nil {
 		return err
 	}
@@ -253,7 +254,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Vault password: ")
 	if err != nil {
 		return err
 	}

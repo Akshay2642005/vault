@@ -3,13 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
+	_ "vault/internal/storage/postgres"
+	_ "vault/internal/storage/sqlite"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // NewInitCmd creates the init command
@@ -49,32 +50,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("vault is already initialized")
 	}
 
-	// Get master password
-	fmt.Print("Enter master password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	// Get master password using centralized auth package
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
+		return err
 	}
-	fmt.Println()
-
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
+	if err := auth.ValidatePassword(password); err != nil {
+		return err
 	}
-
-	// Confirm password
-	fmt.Print("Confirm master password: ")
-	confirm, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
-	}
-	fmt.Println()
-
-	if string(password) != string(confirm) {
-		return fmt.Errorf("passwords do not match")
+	if err := auth.ConfirmPassword(password); err != nil {
+		return err
 	}
 
 	// Create vault
-	if err := backend.CreateVault(ctx, string(password)); err != nil {
+	if err := backend.CreateVault(ctx, password); err != nil {
 		return fmt.Errorf("failed to create vault: %w", err)
 	}
 

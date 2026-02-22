@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
@@ -183,7 +184,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	// Verify restored vault
 	fmt.Println("Verifying restored vault...")
 
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}
