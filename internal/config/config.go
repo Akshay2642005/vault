@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"vault/internal/storage"
 
 	"github.com/spf13/viper"
-	"vault/internal/storage"
 )
 
 const (
@@ -32,6 +32,7 @@ type StorageConfig struct {
 	Database string `mapstructure:"database"`
 	User     string `mapstructure:"user"`
 	Password string `mapstructure:"password"`
+	SSLMode  string `mapstructure:"sslmode"`
 }
 
 // CryptoConfig holds cryptographic configuration

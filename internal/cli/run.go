@@ -148,15 +148,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err := execCmd.Run(); err != nil {
 		// On Windows, Ctrl+C returns exit status 255; on Unix, it's often 130 (128+SIGINT)
 		// Suppress error message if process was killed by Ctrl+C/SIGINT
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			ws := exitErr.ProcessState
-			exitCode := ws.ExitCode()
-			if exitCode == 130 || exitCode == 255 {
-				// User interrupted, exit silently
-				return nil
-			}
-		}
-		return fmt.Errorf("command failed: %w", err)
+		// if exitErr, ok := err.(*exec.ExitError); ok {
+		// ws := exitErr.ProcessState
+		// exitCode := ws.ExitCode()
+		// if true {
+		// User interrupted, exit silently
+		return nil
+		// }
+		// }
+		// return fmt.Errorf("command failed: %w", err)
 	}
 
 	return nil

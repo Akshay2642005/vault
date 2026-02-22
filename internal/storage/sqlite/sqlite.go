@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"vault/internal/crypto"
 	"vault/internal/domain"
 	"vault/internal/storage"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const (

@@ -79,11 +79,11 @@ type Permission struct {
 }
 
 type Project struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Description  string        `json:"description"`
-	Environments []Environment `json:"environment"`
-	Config       ProjectConfig `json:"config"`
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Environments []*Environment `json:"environment"`
+	Config       ProjectConfig  `json:"config"`
 
 	CreatedAt time.Time `json:"created_at"`
 	CreatedBy string    `json:"created_by"`
@@ -94,6 +94,7 @@ type Project struct {
 
 type Environment struct {
 	ID          string          `json:"id"`
+	ProjectID   string          `json:"project_id"`
 	Name        string          `json:"name"`
 	Type        EnvironmentType `json:"type"`
 	Protected   bool            `json:"protected"`
@@ -251,18 +252,18 @@ func NewProject(
 		ID:          GenerateID(),
 		Name:        name,
 		Description: description,
-		Environments: []Environment{
-			{
+		Environments: []*Environment{
+			&Environment{
 				ID:   GenerateID(),
 				Name: "development",
 				Type: EnvDevelopment,
 			},
-			{
+			&Environment{
 				ID:   GenerateID(),
 				Name: "staging",
 				Type: EnvStaging,
 			},
-			{
+			&Environment{
 				ID:          GenerateID(),
 				Name:        "production",
 				Type:        EnvProduction,

@@ -306,7 +306,7 @@ func (b *Backend) CreateProject(ctx context.Context, project *domain.Project) er
 
 	// Insert environments
 	for _, env := range project.Environments {
-		if err := b.CreateEnvironment(ctx, project.ID, &env); err != nil {
+		if err := b.CreateEnvironment(ctx, project.ID, env); err != nil {
 			return err
 		}
 	}
@@ -464,7 +464,7 @@ func (b *Backend) GetEnvironment(ctx context.Context, projectID, envName string)
 }
 
 // ListEnvironments lists all environments for a project
-func (b *Backend) ListEnvironments(ctx context.Context, projectID string) ([]domain.Environment, error) {
+func (b *Backend) ListEnvironments(ctx context.Context, projectID string) ([]*domain.Environment, error) {
 	rows, err := b.db.QueryContext(ctx, `
 		SELECT id, name, type, protected, requires_mfa
 		FROM environments
@@ -476,14 +476,14 @@ func (b *Backend) ListEnvironments(ctx context.Context, projectID string) ([]dom
 	}
 	defer rows.Close()
 
-	var environments []domain.Environment
+	var environments []*domain.Environment
 	for rows.Next() {
 		var env domain.Environment
 		err := rows.Scan(&env.ID, &env.Name, &env.Type, &env.Protected, &env.RequiresMFA)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan environment: %w", err)
 		}
-		environments = append(environments, env)
+		environments = append(environments, &env)
 	}
 
 	return environments, nil

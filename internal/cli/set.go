@@ -178,7 +178,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 			ID:        domain.GenerateID(),
 			SecretID:  existing.ID,
 			Value:     value,
-			Version:   existing.Version,
+			Version:   existing.Version + 1,
 			CreatedAt: time.Now(),
 			CreatedBy: "system",
 			Checksum:  crypto.Hash([]byte(value)),
@@ -189,7 +189,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Printf("✓ Secret updated: %s\n", path)
-		fmt.Printf("  Version: %d\n", existing.Version)
+		fmt.Printf("  Version: %d\n", existing.Version+1)
 	} else {
 		// Create new secret
 		secret, err := domain.NewSecret(
