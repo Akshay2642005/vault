@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"vault/internal/config"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
 )
@@ -67,17 +67,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Get storage configuration
 	cfg := config.GetStorageConfig()
 
-	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	// Create storage backend using factory
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
-
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
 
 	// Unlock vault
 	password, err := promptPassword()

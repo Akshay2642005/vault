@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/spf13/cobra"
 	"vault/internal/config"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -45,16 +46,13 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	cfg := config.GetStorageConfig()
 
 	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
 
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
+	// Initialize backend is handled by factory, no need to call here
 
 	// Verify vault exists
 	initialized, err := backend.IsInitialized(ctx)
@@ -135,16 +133,13 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	cfg := config.GetStorageConfig()
 
 	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
 
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
+	// Initialize backend is handled by factory, no need to call here
 
 	// Check if current vault exists
 	currentExists, err := backend.IsInitialized(ctx)
@@ -193,15 +188,13 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	backend2, err := sqlite.New(cfg)
+	backend2, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to verify: %w", err)
 	}
 	defer backend2.Close()
 
-	if err := backend2.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to verify: %w", err)
-	}
+	// Initialize backend is handled by factory, no need to call here
 
 	if _, err := backend2.UnlockVault(ctx, password); err != nil {
 		return fmt.Errorf("restored vault verification failed: %w\nYour original vault is at: %s.pre-restore", err, cfg.Path)

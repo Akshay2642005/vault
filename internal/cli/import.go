@@ -9,7 +9,7 @@ import (
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 	ft "vault/internal/utils/formatters"
 
 	"github.com/spf13/cobra"
@@ -80,16 +80,11 @@ func runImport(cmd *cobra.Command, args []string) error {
 	cfg := config.GetStorageConfig()
 
 	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
-
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
 
 	// Unlock vault
 	password, err := promptPassword()

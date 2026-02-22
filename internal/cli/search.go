@@ -7,7 +7,7 @@ import (
 
 	"vault/internal/config"
 	"vault/internal/domain"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
 )
@@ -52,16 +52,12 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Searching for secrets matching: %s\n\n", query)
 
 	cfg := config.GetStorageConfig()
-	backend, err := sqlite.New(cfg)
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 
 	defer backend.Close()
-
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialized backend: %w", err)
-	}
 
 	password, err := promptPassword()
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"vault/internal/config"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
 )
@@ -36,17 +36,12 @@ func runList(cmd *cobra.Command, args []string) error {
 	// Get storage configuration
 	cfg := config.GetStorageConfig()
 
-	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	// Create storage backend using factory
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
-
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
 
 	// Unlock vault
 	password, err := promptPassword()
@@ -79,7 +74,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("invalid argument format")
 }
 
-func listProjects(ctx context.Context, backend *sqlite.Backend) error {
+func listProjects(ctx context.Context, backend storage.Backend) error {
 	projects, err := backend.ListProjects(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list projects: %w", err)
@@ -102,7 +97,7 @@ func listProjects(ctx context.Context, backend *sqlite.Backend) error {
 	return nil
 }
 
-func listEnvironments(ctx context.Context, backend *sqlite.Backend, projectName string) error {
+func listEnvironments(ctx context.Context, backend storage.Backend, projectName string) error {
 	project, err := backend.GetProjectByName(ctx, projectName)
 	if err != nil {
 		return fmt.Errorf("project not found: %w", err)
@@ -123,7 +118,7 @@ func listEnvironments(ctx context.Context, backend *sqlite.Backend, projectName 
 	return nil
 }
 
-func listSecrets(ctx context.Context, backend *sqlite.Backend, projectName, environmentName string) error {
+func listSecrets(ctx context.Context, backend storage.Backend, projectName, environmentName string) error {
 	project, err := backend.GetProjectByName(ctx, projectName)
 	if err != nil {
 		return fmt.Errorf("project not found: %w", err)

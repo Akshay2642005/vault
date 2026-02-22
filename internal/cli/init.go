@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 
+	"vault/internal/config"
+	"vault/internal/storage"
+
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"vault/internal/config"
-	"vault/internal/storage/sqlite"
 )
 
 // NewInitCmd creates the init command
@@ -32,16 +33,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	cfg := config.GetStorageConfig()
 
 	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
-
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
 
 	// Check if already initialized
 	initialized, err := backend.IsInitialized(ctx)
