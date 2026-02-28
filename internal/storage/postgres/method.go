@@ -489,16 +489,27 @@ func (b *Backend) ListSecretVersions(ctx context.Context, secretID string) ([]*d
 
 // CreateProject creates a new project
 func (b *Backend) CreateProject(ctx context.Context, project *domain.Project) error {
-	_, err := b.db.ExecContext(ctx, `
+	config, err := json.Marshal(project.Config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal project config: %w", err)
+	}
+
+	_, err = b.db.ExecContext(ctx, `
 		INSERT INTO projects (id, name, description, config, created_at, created_by, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`,
-		project.ID, project.Name, project.Description, project.Config,
+		project.ID, project.Name, project.Description, config,
 		project.CreatedAt, project.CreatedBy, project.UpdatedAt,
 	)
 
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
+	}
+
+	for _, env := range project.Environments {
+		if err := b.CreateEnvironment(ctx, project.ID, env); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -598,7 +609,8 @@ func (b *Backend) ListProjects(ctx context.Context) ([]*domain.Project, error) {
 		if config.Valid {
 			json.Unmarshal([]byte(config.String), &project.Config)
 		}
-		// project.Environments, _ = b.ListEnvironments(ctx, project.ID)
+
+		project.Environments, _ = b.ListEnvironments(ctx, project.ID)
 		projects = append(projects, &project)
 	}
 

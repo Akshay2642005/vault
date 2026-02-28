@@ -117,6 +117,7 @@ func GetStorageConfig() *storage.Config {
 		Database: cfg.Storage.Database,
 		User:     cfg.Storage.User,
 		Password: cfg.Storage.Password,
+		SSLMode:  cfg.Storage.SSLMode,
 	}
 }
 
