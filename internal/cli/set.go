@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
@@ -87,8 +88,8 @@ func runSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("secret value cannot be empty")
 	}
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := sqlite.New(cfg)
@@ -103,7 +104,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}
@@ -239,16 +240,6 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func promptPassword() (string, error) {
-	fmt.Print("Enter master password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return "", fmt.Errorf("failed to read password: %w", err)
-	}
-	fmt.Println()
-	return string(password), nil
 }
 
 func parseDuration(s string) (time.Duration, error) {

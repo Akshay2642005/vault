@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 	ft "vault/internal/utils/formatters"
@@ -74,8 +75,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Exporting secrets from %s/%s to %s (%s format)...\n",
 		projectName, environmentName, exportOutput, format)
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -85,7 +86,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}

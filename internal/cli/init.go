@@ -29,8 +29,8 @@ The password is used to derive an encryption key for all secrets.`,
 func runInit(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)

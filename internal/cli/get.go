@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
@@ -51,8 +52,8 @@ func runGet(cmd *cobra.Command, args []string) error {
 	environmentName := NormalizeEnvironment(parts[1])
 	secretKey := parts[2]
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -62,7 +63,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
@@ -76,8 +77,8 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Importing secrets from %s (%s format)...\n", filepath, format)
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -87,7 +88,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}

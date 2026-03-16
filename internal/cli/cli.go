@@ -52,6 +52,7 @@ across multiple backends with powerful Lua-based configuration.`,
 	rootCmd.AddCommand(NewBackupCmd())
 	rootCmd.AddCommand(NewRestoreCmd())
 	rootCmd.AddCommand(NewRunCmd())
+	rootCmd.AddCommand(NewSyncCmd())
 
 	return rootCmd
 }

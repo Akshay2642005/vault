@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
@@ -33,8 +34,8 @@ Examples:
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend using factory
 	backend, err := storage.NewBackend(cfg)
@@ -44,7 +45,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	defer backend.Close()
 
 	// Unlock vault
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}

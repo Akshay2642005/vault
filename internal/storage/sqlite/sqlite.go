@@ -245,9 +245,9 @@ func (b *Backend) createSchema(ctx context.Context) error {
 
 	-- Full-text search
 	CREATE VIRTUAL TABLE IF NOT EXISTS secrets_fts USING fts5(
-		project_id, 
+		project_id,
 		environment,
-		key, 
+		key,
 		tags,
 		content=secrets,
 		content_rowid=rowid

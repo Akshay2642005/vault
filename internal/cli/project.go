@@ -41,8 +41,8 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	environmentName := parts[1]
 	secretKey := parts[2]
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -121,8 +121,8 @@ func runProjectCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	projectName := args[0]
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
@@ -162,8 +162,8 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	projectName := args[0]
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
@@ -198,7 +198,8 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 func runProjectList(cmd *cobra.Command, args []string) error {
 	// Reuse the listProjects function
 	ctx := context.Background()
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return err
@@ -243,8 +244,8 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	environmentName := parts[1]
 	secretKey := parts[2]
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as the system of record
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)

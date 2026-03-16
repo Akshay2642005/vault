@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
@@ -34,7 +36,7 @@ Examples:
 		RunE: runBackup,
 	}
 
-	cmd.Flags().StringVarP(&backupOutput, "output", "o", "", "Output filename (default: vault-backup-YYYYMMDD-HHMMSS.db)")
+	cmd.Flags().StringVarP(&backupOutput, "output", "o", "", "Backup output path. If a directory, a timestamped filename is generated inside it. If omitted, a timestamped filename is created in the current directory.")
 
 	return cmd
 }
@@ -42,8 +44,8 @@ Examples:
 func runBackup(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as source of truth for backups/restores
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -63,13 +65,40 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("vault not initialized")
 	}
 
-	// Determine output filename
+	// Determine output path
+	// - If --output is omitted: create "vault-backup-YYYYMMDD-HHMMSS.db" in current directory
+	// - If --output is a directory (or ends with a path separator): create timestamped file inside that directory
+	// - If --output is a file path: write exactly there
+	timestamp := time.Now().Format("20060102-150405")
+	defaultName := fmt.Sprintf("vault-backup-%s.db", timestamp)
+
 	if backupOutput == "" {
-		timestamp := time.Now().Format("20060102-150405")
-		backupOutput = fmt.Sprintf("vault-backup-%s.db", timestamp)
+		backupOutput = defaultName
+	} else {
+		outputIsDir := false
+
+		// Treat trailing separator as explicit directory intent
+		if strings.HasSuffix(backupOutput, string(os.PathSeparator)) || strings.HasSuffix(backupOutput, "/") || strings.HasSuffix(backupOutput, "\\") {
+			outputIsDir = true
+		} else if fi, err := os.Stat(backupOutput); err == nil && fi.IsDir() {
+			outputIsDir = true
+		} else if os.IsNotExist(err) {
+			// If it doesn't exist but looks like a directory path, treat as directory intent.
+			// (Heuristic: if it has no extension, assume directory.)
+			if ext := filepath.Ext(backupOutput); ext == "" {
+				outputIsDir = true
+			}
+		}
+
+		if outputIsDir {
+			if err := os.MkdirAll(backupOutput, 0o700); err != nil {
+				return fmt.Errorf("failed to create backup directory: %w", err)
+			}
+			backupOutput = filepath.Join(backupOutput, defaultName)
+		}
 	}
 
-	// Create backup directory if needed
+	// Create parent directory if needed (for file path outputs)
 	backupDir := filepath.Dir(backupOutput)
 	if backupDir != "." && backupDir != "" {
 		if err := os.MkdirAll(backupDir, 0o700); err != nil {
@@ -129,8 +158,8 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("backup file not found: %s", backupFile)
 	}
 
-	// Get storage configuration
-	cfg := config.GetStorageConfig()
+	// Always use PRIMARY storage as source of truth for backups/restores
+	cfg := config.GetPrimaryStorageConfig()
 
 	// Create storage backend
 	backend, err := storage.NewBackend(cfg)
@@ -183,7 +212,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	// Verify restored vault
 	fmt.Println("Verifying restored vault...")
 
-	password, err := promptPassword()
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
 		return err
 	}
