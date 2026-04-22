@@ -26,17 +26,17 @@ tasks:
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BUILD_DIR}}
-      - GOOS=windows GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault.exe {{.MAIN_PATH}}
+      - go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault.exe {{.MAIN_PATH}}
   
   build-all:
     desc: Build for all platforms
     cmds:
       - mkdir -p {{.BUILD_DIR}}
-      - GOOS=linux   GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-amd64 {{.MAIN_PATH}}
-      - GOOS=linux   GOARCH=arm64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-arm64 {{.MAIN_PATH}}
-      - GOOS=darwin  GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-amd64 {{.MAIN_PATH}}
-      - GOOS=darwin  GOARCH=arm64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-arm64 {{.MAIN_PATH}}
-      - GOOS=windows GOARCH=amd64 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-windows-amd64.exe {{.MAIN_PATH}}
+      - GOOS=linux   GOARCH=amd64 CGO_ENABLED=1 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-amd64 {{.MAIN_PATH}}
+      - GOOS=linux   GOARCH=arm64 CGO_ENABLED=1 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-linux-arm64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=amd64 CGO_ENABLED=1 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-amd64 {{.MAIN_PATH}}
+      - GOOS=darwin  GOARCH=arm64 CGO_ENABLED=1 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-darwin-arm64 {{.MAIN_PATH}}
+      - GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -tags "{{.SQLITE_TAGS}}" -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/vault-windows-amd64.exe {{.MAIN_PATH}}
 
   # -------------------------------------------------
   # Run

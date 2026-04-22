@@ -9,6 +9,13 @@ import (
 	"vault/internal/domain"
 )
 
+const sqliteSecretMetadataSelect = `
+	SELECT id, project_id, environment, key, type, tags, metadata,
+	       version, previous_id, created_at, created_by, updated_at, updated_by,
+	       expires_at, rotate_at, owner, checksum, sync_status, last_synced_at
+	FROM secrets
+`
+
 // UpdateSecret updates an existing secret
 func (b *Backend) UpdateSecret(ctx context.Context, secret *domain.Secret) error {
 	if b.key == nil {
@@ -132,6 +139,24 @@ func (b *Backend) ListSecrets(ctx context.Context, projectID, environment string
 	return secrets, nil
 }
 
+// ListSecretMetadata lists secrets without decrypting secret values.
+func (b *Backend) ListSecretMetadata(ctx context.Context, projectID, environment string) ([]*domain.Secret, error) {
+	if b.key == nil {
+		return nil, fmt.Errorf("vault not unlocked")
+	}
+
+	rows, err := b.db.QueryContext(ctx, sqliteSecretMetadataSelect+`
+		WHERE project_id = ? AND environment = ?
+		ORDER BY key
+	`, projectID, environment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query secret metadata: %w", err)
+	}
+	defer rows.Close()
+
+	return scanSecretMetadataRows(rows)
+}
+
 // SearchSecrets searches for secrets using full-text search
 func (b *Backend) SearchSecrets(ctx context.Context, query string) ([]*domain.Secret, error) {
 	if b.key == nil {
@@ -190,6 +215,29 @@ func (b *Backend) SearchSecrets(ctx context.Context, query string) ([]*domain.Se
 	}
 
 	return secrets, nil
+}
+
+// SearchSecretMetadata searches secrets without decrypting secret values.
+func (b *Backend) SearchSecretMetadata(ctx context.Context, query string) ([]*domain.Secret, error) {
+	if b.key == nil {
+		return nil, fmt.Errorf("vault not unlocked")
+	}
+
+	rows, err := b.db.QueryContext(ctx, `
+		SELECT s.id, s.project_id, s.environment, s.key, s.type, s.tags, s.metadata,
+		       s.version, s.previous_id, s.created_at, s.created_by, s.updated_at, s.updated_by,
+		       s.expires_at, s.rotate_at, s.owner, s.checksum, s.sync_status, s.last_synced_at
+		FROM secrets s
+		INNER JOIN secrets_fts fts ON s.rowid = fts.rowid
+		WHERE secrets_fts MATCH ?
+		ORDER BY rank
+	`, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search secret metadata: %w", err)
+	}
+	defer rows.Close()
+
+	return scanSecretMetadataRows(rows)
 }
 
 // CreateSecretVersion creates a new secret version
@@ -386,6 +434,7 @@ func (b *Backend) ListProjects(ctx context.Context) ([]*domain.Project, error) {
 	defer rows.Close()
 
 	var projects []*domain.Project
+	projectIDs := make([]string, 0)
 	for rows.Next() {
 		var project domain.Project
 		var config sql.NullString
@@ -399,10 +448,20 @@ func (b *Backend) ListProjects(ctx context.Context) ([]*domain.Project, error) {
 			json.Unmarshal([]byte(config.String), &project.Config)
 		}
 
-		// Load environments
-		project.Environments, _ = b.ListEnvironments(ctx, project.ID)
-
 		projects = append(projects, &project)
+		projectIDs = append(projectIDs, project.ID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate projects: %w", err)
+	}
+
+	envsByProjectID, err := b.listEnvironmentsByProjectIDs(ctx, projectIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, project := range projects {
+		project.Environments = envsByProjectID[project.ID]
 	}
 
 	return projects, nil
@@ -495,4 +554,119 @@ func (b *Backend) DeleteEnvironment(ctx context.Context, projectID, envID string
 		DELETE FROM environments WHERE project_id = ? AND id = ?
 	`, projectID, envID)
 	return err
+}
+
+func scanSecretMetadataRows(rows *sql.Rows) ([]*domain.Secret, error) {
+	secrets := make([]*domain.Secret, 0)
+	for rows.Next() {
+		secret, err := scanSecretMetadataRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		secrets = append(secrets, secret)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate secret metadata: %w", err)
+	}
+
+	return secrets, nil
+}
+
+func scanSecretMetadataRow(scanner interface {
+	Scan(dest ...any) error
+}) (*domain.Secret, error) {
+	var secret domain.Secret
+	var tags, metadata sql.NullString
+	var expiresAt, rotateAt, lastSyncedAt sql.NullTime
+	var previousID sql.NullString
+
+	err := scanner.Scan(
+		&secret.ID, &secret.ProjectID, &secret.Environment, &secret.Key,
+		&secret.Type, &tags, &metadata,
+		&secret.Version, &previousID, &secret.CreatedAt, &secret.CreatedBy,
+		&secret.UpdatedAt, &secret.UpdatedBy, &expiresAt, &rotateAt,
+		&secret.Owner, &secret.Checksum, &secret.SyncStatus, &lastSyncedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan secret metadata: %w", err)
+	}
+
+	if tags.Valid {
+		if err := json.Unmarshal([]byte(tags.String), &secret.Tags); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal secret tags: %w", err)
+		}
+	} else {
+		secret.Tags = []string{}
+	}
+
+	if metadata.Valid {
+		if err := json.Unmarshal([]byte(metadata.String), &secret.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal secret metadata: %w", err)
+		}
+	} else {
+		secret.Metadata = make(map[string]any)
+	}
+
+	if previousID.Valid {
+		secret.PreviousID = &previousID.String
+	}
+	if expiresAt.Valid {
+		secret.ExpiresAt = &expiresAt.Time
+	}
+	if rotateAt.Valid {
+		secret.RotateAt = &rotateAt.Time
+	}
+	if lastSyncedAt.Valid {
+		secret.LastSyncedAt = &lastSyncedAt.Time
+	}
+
+	return &secret, nil
+}
+
+func (b *Backend) listEnvironmentsByProjectIDs(ctx context.Context, projectIDs []string) (map[string][]*domain.Environment, error) {
+	envsByProjectID := make(map[string][]*domain.Environment, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return envsByProjectID, nil
+	}
+
+	query := `
+		SELECT id, project_id, name, type, protected, requires_mfa
+		FROM environments
+		WHERE project_id IN (?
+	`
+	args := make([]any, 0, len(projectIDs))
+	args = append(args, projectIDs[0])
+	for _, projectID := range projectIDs[1:] {
+		query += ", ?"
+		args = append(args, projectID)
+	}
+	query += `)
+		ORDER BY name`
+
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query environments: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var env domain.Environment
+		if err := rows.Scan(&env.ID, &env.ProjectID, &env.Name, &env.Type, &env.Protected, &env.RequiresMFA); err != nil {
+			return nil, fmt.Errorf("failed to scan environment: %w", err)
+		}
+		envsByProjectID[env.ProjectID] = append(envsByProjectID[env.ProjectID], &env)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate environments: %w", err)
+	}
+
+	for _, projectID := range projectIDs {
+		if envsByProjectID[projectID] == nil {
+			envsByProjectID[projectID] = []*domain.Environment{}
+		}
+	}
+
+	return envsByProjectID, nil
 }

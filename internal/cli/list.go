@@ -126,7 +126,7 @@ func listSecrets(ctx context.Context, backend storage.Backend, projectName, envi
 	}
 
 	// Only use canonical environment name
-	secrets, err := backend.ListSecrets(ctx, project.ID, environmentName)
+	secrets, err := backend.ListSecretMetadata(ctx, project.ID, environmentName)
 	if err != nil || len(secrets) == 0 {
 		return fmt.Errorf("no secrets found in %s/%s", projectName, environmentName)
 	}

@@ -70,7 +70,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to unlock vault: %w", err)
 	}
 
-	secrets, err := backend.SearchSecrets(ctx, query)
+	secrets, err := backend.SearchSecretMetadata(ctx, query)
 	if err != nil {
 		fmt.Printf("No secrets found matching your query: %v\n", err)
 		return nil

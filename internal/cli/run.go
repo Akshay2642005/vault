@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -142,17 +143,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}()
 
 	if err := execCmd.Run(); err != nil {
-		// On Windows, Ctrl+C returns exit status 255; on Unix, it's often 130 (128+SIGINT)
-		// Suppress error message if process was killed by Ctrl+C/SIGINT
-		// if exitErr, ok := err.(*exec.ExitError); ok {
-		// ws := exitErr.ProcessState
-		// exitCode := ws.ExitCode()
-		// if true {
-		// User interrupted, exit silently
-		return nil
-		// }
-		// }
-		// return fmt.Errorf("command failed: %w", err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return fmt.Errorf("command failed with exit code %d", exitErr.ExitCode())
+		}
+		return fmt.Errorf("failed to start command: %w", err)
 	}
 
 	return nil

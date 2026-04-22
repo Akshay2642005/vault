@@ -23,7 +23,9 @@ type Backend interface {
 	UpdateSecret(ctx context.Context, secret *domain.Secret) error
 	DeleteSecret(ctx context.Context, id string) error
 	ListSecrets(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
+	ListSecretMetadata(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	SearchSecrets(ctx context.Context, query string) ([]*domain.Secret, error)
+	SearchSecretMetadata(ctx context.Context, query string) ([]*domain.Secret, error)
 
 	GetSecretVersion(ctx context.Context, secretID string, version int) (*domain.SecretVersion, error)
 	ListSecretVersions(ctx context.Context, secretID string) ([]*domain.SecretVersion, error)
