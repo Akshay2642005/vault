@@ -163,6 +163,7 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - Secret rotation and versioning
 - Sync status tracking
 - SQLite storage with encryption at rest
+- Bidirectional sync to a Postgres target: conflict strategies, scoping, and tombstone-based deletion propagation
 - Command aliases for usability (ls, pr, rm, dev, prod, stage)
 - `run` command for executing processes with secrets injected
 
@@ -192,6 +193,9 @@ All lookups and storage use the canonical environment names (`development`, `sta
 - **Command aliases**: Added `ls`, `pr`, `rm` for common commands and environments (dev, prod, stage).
 - **Run command**: New `vault run <project>/<environment> -- <command>` for running commands with secrets injected into the environment. This replaces the previous `env --exec` usage.
 - **Deprecated**: The `vault env` command is no longer registered; use `vault run` instead.
+- **Sync engine**: Bidirectional sync (push/pull/both) with real conflict detection and `fail`/`prefer-local`/`prefer-remote`/`prefer-latest` strategies, plus project/environment scoping and `--since` filtering.
+- **Tombstones**: Deletions record tombstones that prevent resurrection; propagation is opt-in via `--delete-remote`/`--delete-local` (never with `--approve`).
+- **Sync observability**: Every run recorded as metadata-only `SyncRun`; `vault sync status` shows history without unlocking.
 - **Docker Compose**: PostgreSQL 16 service for local development.
 - **GoReleaser**: Automated build and release configuration.
 
@@ -261,6 +265,28 @@ vault run myapp/production -- python app.py
 
 **Note:**  
 The previous `vault env` command is deprecated and no longer registered. Use `vault run` for all new workflows.
+
+---
+
+## Sync (Primary ↔ Postgres)
+
+The `sync` command reconciles the PRIMARY SQLite vault with an optional Postgres SYNC target sharing the same master password:
+
+```sh
+vault sync enable
+vault sync run [project/environment] [--direction push|pull|both] \
+  [--conflict fail|prefer-local|prefer-remote|prefer-latest] \
+  [--dry-run] [--since RFC3339] [--approve]
+vault sync status [--limit N]
+```
+
+- **Configuration**: enabled by `storage.sync.postgres` in `config.yaml` (`host`/`database`/`user` required; `port` defaults to 5432, `sslmode` defaults to `disable`).
+- **Semantics**: secrets changed since the last sync flow to the other side (`UpdatedAt > LastSyncedAt`; never-synced counts as changed). A secret changed on *both* sides is a conflict, resolved by the strategy; `fail` is the default and `prefer-latest` errors on exact ties.
+- **Tombstones**: deletions record a tombstone (identity + pre-delete checksum) in-transaction, so sync never resurrects them. Propagation is opt-in per run via `--delete-remote`/`--delete-local`; both require interactive confirmation and are refused with `--approve`. Recreating a deleted secret clears the stale tombstone after sync.
+- **Observability**: every run is recorded as a metadata-only `SyncRun` on the primary; `vault sync status` reads it without unlocking.
+- **Tests**: the engine matrix (direction × strategy × scope) lives in `internal/sync/engine/engine_test.go`; mirror storage in `internal/storage/{sqlite,postgres}`. Sqlite tests require `-tags sqlite_fts5`.
+
+---
 
 ## Infrastructure: Docker Compose & GoReleaser
 
