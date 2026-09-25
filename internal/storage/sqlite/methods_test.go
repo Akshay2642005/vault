@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"vault/internal/crypto"
 	"vault/internal/domain"
@@ -51,6 +52,62 @@ func TestListSecretMetadataSkipsDecryption(t *testing.T) {
 	}
 	if len(secrets[0].Tags) != 2 {
 		t.Fatalf("ListSecretMetadata() tags len = %d, want 2", len(secrets[0].Tags))
+	}
+}
+
+func TestMarkSyncedSetsSyncMetadataWithoutBumpingVersion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	backend := newTestBackend(t, ctx)
+
+	project, err := domain.NewProject("syncmark", "sync mark project", "test")
+	if err != nil {
+		t.Fatalf("NewProject() error = %v", err)
+	}
+	if err := backend.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	secret, err := domain.NewSecret(project.ID, "development", "TOKEN", "s3cr3t", domain.SecretTypeOAuthToken, "test")
+	if err != nil {
+		t.Fatalf("NewSecret() error = %v", err)
+	}
+	if err := backend.CreateSecret(ctx, secret); err != nil {
+		t.Fatalf("CreateSecret() error = %v", err)
+	}
+
+	syncedAt := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	if err := backend.MarkSynced(ctx, secret.ID, syncedAt); err != nil {
+		t.Fatalf("MarkSynced() error = %v", err)
+	}
+
+	got, err := backend.GetSecretByID(ctx, secret.ID)
+	if err != nil {
+		t.Fatalf("GetSecretByID() error = %v", err)
+	}
+	if got.SyncStatus != domain.SyncStatusInSync {
+		t.Fatalf("SyncStatus = %q, want %q", got.SyncStatus, domain.SyncStatusInSync)
+	}
+	if got.LastSyncedAt == nil || !got.LastSyncedAt.Equal(syncedAt) {
+		t.Fatalf("LastSyncedAt = %v, want %v", got.LastSyncedAt, syncedAt)
+	}
+	// Value and version history must be untouched by sync bookkeeping.
+	if got.Value != "s3cr3t" {
+		t.Fatalf("Value = %q, want %q", got.Value, "s3cr3t")
+	}
+	if got.Version != 1 {
+		t.Fatalf("Version = %d, want 1", got.Version)
+	}
+
+	// ListSecrets must round-trip last_synced_at so the sync engine can use it
+	// for conflict detection.
+	listed, err := backend.ListSecrets(ctx, project.ID, "development")
+	if err != nil {
+		t.Fatalf("ListSecrets() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].LastSyncedAt == nil || !listed[0].LastSyncedAt.Equal(syncedAt) {
+		t.Fatalf("ListSecrets() did not round-trip last_synced_at: %+v", listed)
 	}
 }
 

@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"vault/internal/auth"
 	synccli "vault/internal/cli/sync"
@@ -287,61 +286,4 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	synccli.RenderResult(res)
 	return nil
-}
-
-func parseSyncScope(args []string) (syncengine.Scope, error) {
-	if len(args) == 0 {
-		return syncengine.Scope{}, nil
-	}
-
-	parts := strings.Split(args[0], "/")
-	if len(parts) != 2 {
-		return syncengine.Scope{}, fmt.Errorf("invalid scope. Expected: project/environment")
-	}
-
-	return syncengine.Scope{
-		ProjectName:     parts[0],
-		EnvironmentName: NormalizeEnvironment(parts[1]),
-	}, nil
-}
-
-func parseSyncDirection(v string) (syncengine.Direction, error) {
-	switch syncengine.Direction(v) {
-	case syncengine.DirectionPush, syncengine.DirectionPull, syncengine.DirectionBoth:
-		return syncengine.Direction(v), nil
-	default:
-		return "", fmt.Errorf("invalid --direction %q (expected push, pull, both)", v)
-	}
-}
-
-func parseConflictStrategy(v string) (syncengine.ConflictStrategy, error) {
-	switch syncengine.ConflictStrategy(v) {
-	case syncengine.ConflictFail,
-		syncengine.ConflictPreferLocal,
-		syncengine.ConflictPreferRemote,
-		syncengine.ConflictPreferLatest:
-		return syncengine.ConflictStrategy(v), nil
-	default:
-		return "", fmt.Errorf("invalid --conflict %q (expected fail, prefer-local, prefer-remote, prefer-latest)", v)
-	}
-}
-
-func renderSyncPlan(plan syncengine.Plan) {
-	// Keep CLI output simple and consistent with other commands.
-	fmt.Printf("Planned PULL operations (remote -> local): %d\n", len(plan.Pull))
-	for _, op := range plan.Pull {
-		fmt.Printf("  - %s %s/%s/%s\n", op.Kind, op.ProjectName, op.Environment, op.Key)
-	}
-
-	fmt.Printf("\nPlanned PUSH operations (local -> remote): %d\n", len(plan.Push))
-	for _, op := range plan.Push {
-		fmt.Printf("  - %s %s/%s/%s\n", op.Kind, op.ProjectName, op.Environment, op.Key)
-	}
-
-	if len(plan.Conflicts) > 0 {
-		fmt.Printf("\nConflicts detected: %d\n", len(plan.Conflicts))
-		for _, c := range plan.Conflicts {
-			fmt.Printf("  - %s/%s/%s (%s)\n", c.ProjectName, c.Environment, c.Key, c.Reason)
-		}
-	}
 }

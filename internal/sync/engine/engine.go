@@ -23,7 +23,7 @@ import (
 //   - Therefore, this engine implements a pragmatic reconciliation based on snapshots:
 //     identity = (project name, environment name, secret key)
 //     equality = checksum match (preferred), otherwise value+metadata compare (best effort)
-//     recency  = UpdatedAt timestamp
+//     change   = UpdatedAt later than LastSyncedAt (never-synced secrets count as changed)
 //
 // With a future change-log, we can replace Snapshot reconciliation with a proper CRDT / vector-clock protocol.
 type Engine struct {
@@ -249,7 +249,51 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 				continue
 			}
 
-			// If one is strictly newer by UpdatedAt, treat as normal update.
+			// A side "changed since the last sync" when its UpdatedAt is after
+			// its LastSyncedAt — or it has never been synced at all. Genuine
+			// conflicts only exist when BOTH sides changed since their last
+			// sync; a single-sided change is a normal push/pull.
+			lChanged := changedSince(ls)
+			rChanged := changedSince(rs)
+
+			switch {
+			case lChanged && !rChanged:
+				// Only the local side changed since the last sync: push.
+				plan.Push = append(plan.Push, Operation{
+					Kind:        OpUpsertRemote,
+					ProjectName: id.project,
+					Environment: id.env,
+					Key:         id.key,
+					Secret:      ls,
+				})
+				continue
+
+			case !lChanged && rChanged:
+				// Only the remote side changed since the last sync: pull.
+				plan.Pull = append(plan.Pull, Operation{
+					Kind:        OpUpsertLocal,
+					ProjectName: id.project,
+					Environment: id.env,
+					Key:         id.key,
+					Secret:      rs,
+				})
+				continue
+
+			case lChanged && rChanged:
+				plan.Conflicts = append(plan.Conflicts, Conflict{
+					ProjectName: id.project,
+					Environment: id.env,
+					Key:         id.key,
+					Local:       ls,
+					Remote:      rs,
+					Reason:      "both sides changed since the last sync",
+				})
+				continue
+			}
+
+			// Neither side changed since its last sync, yet the snapshots
+			// differ (e.g. an out-of-band write that bypassed sync). Fall back
+			// to recency; equal timestamps are treated as a conflict.
 			if ls.UpdatedAt.After(rs.UpdatedAt) {
 				plan.Push = append(plan.Push, Operation{
 					Kind:        OpUpsertRemote,
@@ -278,7 +322,7 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 				Key:         id.key,
 				Local:       ls,
 				Remote:      rs,
-				Reason:      "local and remote differ but UpdatedAt timestamps are equal",
+				Reason:      "local and remote differ but neither has changed since the last sync (equal UpdatedAt)",
 			})
 		}
 	}
@@ -374,9 +418,32 @@ func (e *Engine) applyConflictStrategy(plan *Plan) error {
 		return nil
 
 	case ConflictPreferLatest:
-		// In our snapshot logic, conflicts only occur when UpdatedAt ties.
-		// So prefer-latest cannot resolve these; require user to pick side.
-		return fmt.Errorf("conflicts have equal UpdatedAt; --conflict prefer-latest cannot resolve (%d conflicts)", len(plan.Conflicts))
+		// Conflicts are now genuine (both sides changed since the last sync),
+		// so recency can resolve them — except when UpdatedAt ties exactly.
+		for _, c := range plan.Conflicts {
+			switch {
+			case c.Local != nil && (c.Remote == nil || c.Local.UpdatedAt.After(c.Remote.UpdatedAt)):
+				plan.Push = append(plan.Push, Operation{
+					Kind:        OpUpsertRemote,
+					ProjectName: c.ProjectName,
+					Environment: c.Environment,
+					Key:         c.Key,
+					Secret:      c.Local,
+				})
+			case c.Remote != nil && (c.Local == nil || c.Remote.UpdatedAt.After(c.Local.UpdatedAt)):
+				plan.Pull = append(plan.Pull, Operation{
+					Kind:        OpUpsertLocal,
+					ProjectName: c.ProjectName,
+					Environment: c.Environment,
+					Key:         c.Key,
+					Secret:      c.Remote,
+				})
+			default:
+				return fmt.Errorf("conflict on %s/%s/%s has equal UpdatedAt; --conflict prefer-latest cannot resolve it", c.ProjectName, c.Environment, c.Key)
+			}
+		}
+		plan.Conflicts = nil
+		return nil
 
 	default:
 		return fmt.Errorf("unknown conflict strategy: %s", e.opts.Strategy)
@@ -556,6 +623,8 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 		return fmt.Errorf("upsert missing snapshot for %s/%s/%s", projectName, env, key)
 	}
 
+	t := now()
+
 	// Ensure project exists on destination (auto-create if missing).
 	dstProj, err := dst.GetProjectByName(ctx, projectName)
 	if err != nil {
@@ -622,20 +691,32 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 		newSecret.Owner = snap.Owner
 		newSecret.Permissions = cloneStrings(snap.Permissions)
 
+		// Preserve the source's temporal/version identity so the destination
+		// mirror reports the same history as the source, not the sync time.
+		newSecret.Version = snap.Version
+		newSecret.PreviousID = snap.PreviousID
+		newSecret.CreatedAt = snap.CreatedAt
+		newSecret.CreatedBy = snap.CreatedBy
+		newSecret.UpdatedAt = snap.UpdatedAt
+		newSecret.UpdatedBy = snap.UpdatedBy
+
 		// Keep checksum if present; otherwise backend-side secret creation computed it earlier in codebase.
 		if snap.Checksum != "" {
 			newSecret.Checksum = snap.Checksum
 		}
 
 		// Mark sync metadata.
-		t := now()
 		newSecret.SyncStatus = domain.SyncStatusInSync
 		newSecret.LastSyncedAt = &t
 
 		if err := dst.CreateSecret(ctx, newSecret); err != nil {
 			return fmt.Errorf("failed to create destination secret %s/%s/%s: %w", projectName, env, key, err)
 		}
-		return nil
+
+		// Record sync bookkeeping on both sides. Destination was just marked
+		// above; this also stamps the source so the next reconciliation knows
+		// this change was already propagated.
+		return markSyncedBoth(ctx, src, dst, projectName, env, key, t)
 	}
 
 	// update existing
@@ -645,25 +726,64 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 	existing.Metadata = cloneMap(snap.Metadata)
 	existing.ExpiresAt = snap.ExpiresAt
 	existing.RotateAt = snap.RotateAt
+	existing.Owner = snap.Owner
+	existing.Permissions = cloneStrings(snap.Permissions)
 
-	// Set update metadata to indicate sync origin.
-	existing.UpdatedAt = now()
-	existing.UpdatedBy = "sync"
+	// Preserve the source's last-edit metadata so version history and audit
+	// fields reflect when the change actually happened, not when sync
+	// propagated it.
+	existing.UpdatedAt = snap.UpdatedAt
+	existing.UpdatedBy = snap.UpdatedBy
 
 	if snap.Checksum != "" {
 		existing.Checksum = snap.Checksum
 	}
 
 	// Mark sync metadata.
-	t := now()
 	existing.SyncStatus = domain.SyncStatusInSync
 	existing.LastSyncedAt = &t
 
 	if err := dst.UpdateSecret(ctx, existing); err != nil {
 		return fmt.Errorf("failed to update destination secret %s/%s/%s: %w", projectName, env, key, err)
 	}
-	_ = src // reserved for future: could read src again to confirm checksum after apply
-	return nil
+
+	// Record sync bookkeeping on both sides (see comment in create path).
+	return markSyncedBoth(ctx, src, dst, projectName, env, key, t)
+}
+
+// markSyncedBoth stamps sync bookkeeping on both backends with the same
+// timestamp. It only touches sync_status/last_synced_at — never the value,
+// UpdatedAt, or version history — so the next reconciliation can correctly
+// classify "changed since last sync".
+func markSyncedBoth(ctx context.Context, a, b storage.Backend, projectName, env, key string, t time.Time) error {
+	if err := markSideSynced(ctx, a, projectName, env, key, t); err != nil {
+		return err
+	}
+	return markSideSynced(ctx, b, projectName, env, key, t)
+}
+
+func markSideSynced(ctx context.Context, backend storage.Backend, projectName, env, key string, t time.Time) error {
+	proj, err := backend.GetProjectByName(ctx, projectName)
+	if err != nil {
+		return nil // nothing to mark on this side
+	}
+	s, err := backend.GetSecret(ctx, proj.ID, env, key)
+	if err != nil {
+		return nil // secret absent on this side; nothing to mark
+	}
+	return backend.MarkSynced(ctx, s.ID, t)
+}
+
+// changedSince reports whether the snapshot was modified after its last sync.
+// A secret that has never been synced is considered changed.
+func changedSince(s *SecretSnapshot) bool {
+	if s == nil {
+		return false
+	}
+	if s.LastSyncedAt == nil {
+		return true
+	}
+	return s.UpdatedAt.After(*s.LastSyncedAt)
 }
 
 func cloneStrings(in []string) []string {

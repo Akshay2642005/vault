@@ -50,11 +50,11 @@ install: build ## Build and install to /usr/local/bin
 
 test: ## Run tests
 	@echo "Running tests..."
-	$(GOTEST) -v -race -cover ./...
+	$(GOTEST) -v -race -cover -tags sqlite_fts5 ./...
 
 test-coverage: ## Run tests with coverage report
 	@echo "Running tests with coverage..."
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOTEST) -v -race -coverprofile=coverage.out -tags sqlite_fts5 ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 

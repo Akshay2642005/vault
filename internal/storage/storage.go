@@ -22,6 +22,12 @@ type Backend interface {
 	GetSecretByID(ctx context.Context, id string) (*domain.Secret, error)
 	UpdateSecret(ctx context.Context, secret *domain.Secret) error
 	DeleteSecret(ctx context.Context, id string) error
+
+	// MarkSynced records successful sync bookkeeping on a secret — updating
+	// only sync_status and last_synced_at. It never touches the value,
+	// UpdatedAt, or version history, so it is safe to call as part of a sync
+	// apply without disturbing normal (non-sync) edits.
+	MarkSynced(ctx context.Context, secretID string, syncedAt time.Time) error
 	ListSecrets(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	ListSecretMetadata(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	SearchSecrets(ctx context.Context, query string) ([]*domain.Secret, error)

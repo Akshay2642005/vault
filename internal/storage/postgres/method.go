@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"vault/internal/domain"
 )
@@ -241,12 +242,15 @@ func (b *Backend) UpdateSecret(ctx context.Context, secret *domain.Secret) error
 			updated_by = $6,
 			expires_at = $7,
 			rotate_at = $8,
-			checksum = $9
-		WHERE id = $10
+			checksum = $9,
+			sync_status = $10,
+			last_synced_at = $11
+		WHERE id = $12
 	`,
 		encryptedValue, secret.Type, tags, metadata,
 		secret.UpdatedAt, secret.UpdatedBy,
 		secret.ExpiresAt, secret.RotateAt, secret.Checksum,
+		secret.SyncStatus, secret.LastSyncedAt,
 		secret.ID,
 	)
 
@@ -254,6 +258,21 @@ func (b *Backend) UpdateSecret(ctx context.Context, secret *domain.Secret) error
 		return fmt.Errorf("failed to update secret: %w", err)
 	}
 
+	return nil
+}
+
+// MarkSynced records sync bookkeeping on a secret without altering its value,
+// UpdatedAt, or version history.
+func (b *Backend) MarkSynced(ctx context.Context, secretID string, syncedAt time.Time) error {
+	_, err := b.db.ExecContext(ctx, `
+		UPDATE secrets SET
+			sync_status = $1,
+			last_synced_at = $2
+		WHERE id = $3
+	`, domain.SyncStatusInSync, syncedAt, secretID)
+	if err != nil {
+		return fmt.Errorf("failed to mark secret synced: %w", err)
+	}
 	return nil
 }
 
@@ -275,7 +294,7 @@ func (b *Backend) ListSecrets(ctx context.Context, projectID, environment string
 	query := `
 		SELECT id, project_id, environment, key, value, type, tags, metadata,
 		       version, created_at, created_by, updated_at, updated_by,
-		       owner, checksum, sync_status
+		       owner, checksum, sync_status, last_synced_at
 		FROM secrets
 		WHERE project_id = $1 AND environment = $2
 		ORDER BY key
@@ -292,17 +311,22 @@ func (b *Backend) ListSecrets(ctx context.Context, projectID, environment string
 		var secret domain.Secret
 		var encryptedValue []byte
 		var tags, metadata sql.NullString
+		var lastSyncedAt sql.NullTime
 
 		err := rows.Scan(
 			&secret.ID, &secret.ProjectID, &secret.Environment, &secret.Key,
 			&encryptedValue, &secret.Type, &tags, &metadata,
 			&secret.Version, &secret.CreatedAt, &secret.CreatedBy,
 			&secret.UpdatedAt, &secret.UpdatedBy,
-			&secret.Owner, &secret.Checksum, &secret.SyncStatus,
+			&secret.Owner, &secret.Checksum, &secret.SyncStatus, &lastSyncedAt,
 		)
 
 		if err != nil {
 			return nil, err
+		}
+
+		if lastSyncedAt.Valid {
+			secret.LastSyncedAt = &lastSyncedAt.Time
 		}
 
 		// Decrypt value
