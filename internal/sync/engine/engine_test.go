@@ -84,23 +84,30 @@ func getTombstone(t *testing.T, ctx context.Context, b storage.Backend, key stri
 // seedSecret creates project "myapp" (if absent) plus a secret in development.
 func seedSecret(t *testing.T, ctx context.Context, b storage.Backend, key, value string, updatedAt time.Time) {
 	t.Helper()
+	seedSecretIn(t, ctx, b, "myapp", "development", key, value, updatedAt)
+}
 
-	proj, err := b.GetProjectByName(ctx, "myapp")
+// seedSecretIn creates (if needed) the given project and seeds a secret in the
+// given environment. seedSecret is a myapp/development shorthand of this.
+func seedSecretIn(t *testing.T, ctx context.Context, b storage.Backend, project, env, key, value string, updatedAt time.Time) {
+	t.Helper()
+
+	proj, err := b.GetProjectByName(ctx, project)
 	if err != nil {
-		proj, err = domain.NewProject("myapp", "", "test")
+		proj, err = domain.NewProject(project, "", "test")
 		if err != nil {
-			t.Fatalf("NewProject() error = %v", err)
+			t.Fatalf("NewProject(%q) error = %v", project, err)
 		}
 		if err := b.CreateProject(ctx, proj); err != nil {
-			t.Fatalf("CreateProject() error = %v", err)
+			t.Fatalf("CreateProject(%q) error = %v", project, err)
 		}
-		proj, err = b.GetProjectByName(ctx, "myapp")
+		proj, err = b.GetProjectByName(ctx, project)
 		if err != nil {
-			t.Fatalf("GetProjectByName() error = %v", err)
+			t.Fatalf("GetProjectByName(%q) error = %v", project, err)
 		}
 	}
 
-	secret, err := domain.NewSecret(proj.ID, "development", key, value, domain.SecretTypeGeneric, "test")
+	secret, err := domain.NewSecret(proj.ID, env, key, value, domain.SecretTypeGeneric, "test")
 	if err != nil {
 		t.Fatalf("NewSecret() error = %v", err)
 	}
@@ -155,11 +162,31 @@ func getSecret(t *testing.T, ctx context.Context, b storage.Backend, key string)
 // exist on a backend.
 func getSecretErr(t *testing.T, ctx context.Context, b storage.Backend, key string) (*domain.Secret, error) {
 	t.Helper()
-	proj, err := b.GetProjectByName(ctx, "myapp")
+	return getSecretErrIn(t, ctx, b, "myapp", "development", key)
+}
+
+// getSecretIn reads a secret by full identity (project/env/key).
+func getSecretIn(t *testing.T, ctx context.Context, b storage.Backend, project, env, key string) *domain.Secret {
+	t.Helper()
+	proj, err := b.GetProjectByName(ctx, project)
+	if err != nil {
+		t.Fatalf("GetProjectByName(%q) error = %v", project, err)
+	}
+	secret, err := b.GetSecret(ctx, proj.ID, env, key)
+	if err != nil {
+		t.Fatalf("GetSecret(%s/%s/%s) error = %v", project, env, key, err)
+	}
+	return secret
+}
+
+// getSecretErrIn is the non-fatal variant used to assert absence by identity.
+func getSecretErrIn(t *testing.T, ctx context.Context, b storage.Backend, project, env, key string) (*domain.Secret, error) {
+	t.Helper()
+	proj, err := b.GetProjectByName(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	return b.GetSecret(ctx, proj.ID, "development", key)
+	return b.GetSecret(ctx, proj.ID, env, key)
 }
 
 func syncPlan(t *testing.T, env *testEnv, opts Options) Plan {
@@ -760,5 +787,369 @@ func TestScopedDeleteRemoteOnly(t *testing.T) {
 	plan := syncPlan(t, env, Options{Scope: scope, DeleteRemoteMissing: true, Clock: fixedClock(t0)})
 	if len(plan.Push) != 1 || plan.Push[0].Kind != OpDeleteRemote {
 		t.Fatalf("scoped delete-remote plan wrong: %+v", plan.Push)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: direction / strategy / scope matrix
+// ---------------------------------------------------------------------------
+
+// Direction push must apply only push-side operations: remote-only secrets are
+// planned as pulls but never pulled, while local-only secrets are pushed.
+func TestDirectionPushAppliesOnlyPushOps(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedSecret(t, ctx, env.local, "LOCAL_ONLY", "local-value", t0)
+	seedSecret(t, ctx, env.remote, "REMOTE_ONLY", "remote-value", t0)
+
+	// The plan still lists both sides; only pushes apply under push.
+	plan := syncPlan(t, env, Options{Direction: DirectionPush, Clock: fixedClock(t0)})
+	if len(plan.Push) != 1 || len(plan.Pull) != 1 {
+		t.Fatalf("push plan = %d pushes, %d pulls; want 1 each (planned, direction-gated)", len(plan.Push), len(plan.Pull))
+	}
+
+	res, err := New(env.local, env.remote, Options{Direction: DirectionPush, Clock: fixedClock(t0)}).Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.OperationsApplied != 1 {
+		t.Fatalf("OperationsApplied = %d, want 1 (only the push op)", res.OperationsApplied)
+	}
+
+	// Local-only secret was pushed...
+	if got := getSecret(t, ctx, env.remote, "LOCAL_ONLY").Value; got != "local-value" {
+		t.Fatalf("remote LOCAL_ONLY = %q, want %q", got, "local-value")
+	}
+	// ...but the remote-only secret was NOT pulled.
+	if _, err := getSecretErr(t, ctx, env.local, "REMOTE_ONLY"); err == nil {
+		t.Fatal("local REMOTE_ONLY exists after push-direction sync (pull op was applied)")
+	}
+	// Remote-only source untouched.
+	getSecret(t, ctx, env.remote, "REMOTE_ONLY")
+
+	// Re-running with both directions converges fully.
+	if _, err := New(env.local, env.remote, Options{Clock: fixedClock(t0)}).Sync(ctx, false); err != nil {
+		t.Fatalf("both-direction Sync() error = %v", err)
+	}
+	if got := getSecret(t, ctx, env.local, "REMOTE_ONLY").Value; got != "remote-value" {
+		t.Fatalf("local REMOTE_ONLY after both sync = %q, want %q", got, "remote-value")
+	}
+}
+
+// Direction pull mirrors push: local-only secrets are planned as pushes but
+// never pushed, while remote-only secrets are pulled.
+func TestDirectionPullAppliesOnlyPullOps(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedSecret(t, ctx, env.local, "LOCAL_ONLY", "local-value", t0)
+	seedSecret(t, ctx, env.remote, "REMOTE_ONLY", "remote-value", t0)
+
+	// The plan still lists both sides; only pulls apply under pull.
+	plan := syncPlan(t, env, Options{Direction: DirectionPull, Clock: fixedClock(t0)})
+	if len(plan.Push) != 1 || len(plan.Pull) != 1 {
+		t.Fatalf("pull plan = %d pushes, %d pulls; want 1 each (planned, direction-gated)", len(plan.Push), len(plan.Pull))
+	}
+
+	res, err := New(env.local, env.remote, Options{Direction: DirectionPull, Clock: fixedClock(t0)}).Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.OperationsApplied != 1 {
+		t.Fatalf("OperationsApplied = %d, want 1 (only the pull op)", res.OperationsApplied)
+	}
+
+	// Remote-only secret was pulled...
+	if got := getSecret(t, ctx, env.local, "REMOTE_ONLY").Value; got != "remote-value" {
+		t.Fatalf("local REMOTE_ONLY = %q, want %q", got, "remote-value")
+	}
+	// ...but the local-only secret was NOT pushed.
+	if _, err := getSecretErr(t, ctx, env.remote, "LOCAL_ONLY"); err == nil {
+		t.Fatal("remote LOCAL_ONLY exists after pull-direction sync (push op was applied)")
+	}
+}
+
+// Push + delete-remote-missing makes the remote converge to the local set:
+// local-only secrets are pushed and remote-only ones are deleted remotely.
+func TestDirectionPushDeleteRemoteMissingConvergesToLocalSet(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedSecret(t, ctx, env.local, "LOCAL_ONLY", "local-value", t0)
+	seedSecret(t, ctx, env.remote, "REMOTE_ONLY", "remote-value", t0)
+
+	plan := syncPlan(t, env, Options{Direction: DirectionPush, DeleteRemoteMissing: true, Clock: fixedClock(t0)})
+	if len(plan.Push) != 2 || len(plan.Pull) != 0 {
+		t.Fatalf("push+delete plan = %d pushes, %d pulls; want 2 and 0", len(plan.Push), len(plan.Pull))
+	}
+	kinds := map[OperationKind]int{}
+	for _, op := range plan.Push {
+		kinds[op.Kind]++
+	}
+	if kinds[OpUpsertRemote] != 1 || kinds[OpDeleteRemote] != 1 {
+		t.Fatalf("push op kinds = %v, want one upsert-remote and one delete-remote", kinds)
+	}
+
+	res, err := New(env.local, env.remote, Options{Direction: DirectionPush, DeleteRemoteMissing: true, Clock: fixedClock(t0)}).Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.OperationsApplied != 2 {
+		t.Fatalf("OperationsApplied = %d, want 2", res.OperationsApplied)
+	}
+
+	// Remote now mirrors the local set exactly.
+	if got := getSecret(t, ctx, env.remote, "LOCAL_ONLY").Value; got != "local-value" {
+		t.Fatalf("remote LOCAL_ONLY = %q, want %q", got, "local-value")
+	}
+	if _, err := getSecretErr(t, ctx, env.remote, "REMOTE_ONLY"); err == nil {
+		t.Fatal("remote REMOTE_ONLY still present after delete-remote-missing sync")
+	}
+	// Local untouched apart from sync bookkeeping.
+	getSecret(t, ctx, env.local, "LOCAL_ONLY")
+	if _, err := getSecretErr(t, ctx, env.local, "REMOTE_ONLY"); err == nil {
+		t.Fatal("local REMOTE_ONLY exists where it should never have been created")
+	}
+}
+
+// prefer-remote resolves both-sides-changed conflicts in favor of the remote
+// value, mirroring the existing prefer-local test.
+func TestPreferRemoteWinsConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	t2 := t0.Add(2 * time.Hour)
+	t3 := t0.Add(3 * time.Hour)
+
+	seedSecret(t, ctx, env.local, "API_KEY", "v1", t0)
+	engine := New(env.local, env.remote, Options{Clock: fixedClock(t1)})
+	if _, err := engine.Sync(ctx, false); err != nil {
+		t.Fatalf("initial Sync() error = %v", err)
+	}
+
+	editSecret(t, ctx, env.local, "API_KEY", "v2-local", t2)
+	editSecret(t, ctx, env.remote, "API_KEY", "v2-remote", t3)
+
+	// Conflict is detected pre-resolution and resolved into a pull op.
+	plan := syncPlan(t, env, Options{Strategy: ConflictPreferRemote, Clock: fixedClock(t3)})
+	if plan.Detected != 1 {
+		t.Fatalf("plan.Detected = %d, want 1", plan.Detected)
+	}
+	if len(plan.Conflicts) != 0 || len(plan.Pull) != 1 || len(plan.Push) != 0 {
+		t.Fatalf("prefer-remote plan wrong: %d conflicts, %d pulls, %d pushes", len(plan.Conflicts), len(plan.Pull), len(plan.Push))
+	}
+
+	engine2 := New(env.local, env.remote, Options{Strategy: ConflictPreferRemote, Clock: fixedClock(t3)})
+	res, err := engine2.Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	// ConflictsDetected is the pre-resolution count (Plan.Detected), so a
+	// strategy-resolved conflict is still reported — by design, for observability.
+	if res.OperationsApplied != 1 || res.ConflictsDetected != 1 {
+		t.Fatalf("result = %d applied, %d conflicts; want 1 and 1 (resolved but detected)", res.OperationsApplied, res.ConflictsDetected)
+	}
+	if got := getSecret(t, ctx, env.local, "API_KEY").Value; got != "v2-remote" {
+		t.Fatalf("local Value = %q, want %q (remote won)", got, "v2-remote")
+	}
+	if got := getSecret(t, ctx, env.remote, "API_KEY").Value; got != "v2-remote" {
+		t.Fatalf("remote Value = %q, want %q (must not be overwritten)", got, "v2-remote")
+	}
+}
+
+// A conflict resolved into an op that the chosen direction cannot apply is
+// planned and reported but not applied: under push with prefer-remote the
+// resolution is a pull, so the run converges nothing. Re-running with both
+// directions converges fully. This documents direction-gated application.
+func TestResolvedConflictOutsideDirectionIsNotApplied(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	t2 := t0.Add(2 * time.Hour)
+	t3 := t0.Add(3 * time.Hour)
+
+	seedSecret(t, ctx, env.local, "API_KEY", "v1", t0)
+	engine := New(env.local, env.remote, Options{Clock: fixedClock(t1)})
+	if _, err := engine.Sync(ctx, false); err != nil {
+		t.Fatalf("initial Sync() error = %v", err)
+	}
+
+	editSecret(t, ctx, env.local, "API_KEY", "v2-local", t2)
+	editSecret(t, ctx, env.remote, "API_KEY", "v2-remote", t3)
+
+	opts := Options{Direction: DirectionPush, Strategy: ConflictPreferRemote, Clock: fixedClock(t3)}
+	plan := syncPlan(t, env, opts)
+	if plan.Detected != 1 {
+		t.Fatalf("plan.Detected = %d, want 1", plan.Detected)
+	}
+	if len(plan.Pull) != 1 || len(plan.Push) != 0 {
+		t.Fatalf("plan = %d pulls, %d pushes; want the prefer-remote resolution as one pull", len(plan.Pull), len(plan.Push))
+	}
+
+	res, err := New(env.local, env.remote, opts).Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.OperationsApplied != 0 {
+		t.Fatalf("OperationsApplied = %d, want 0 (pull resolution out of push direction)", res.OperationsApplied)
+	}
+	if got := getSecret(t, ctx, env.local, "API_KEY").Value; got != "v2-local" {
+		t.Fatalf("local Value = %q, want %q (unchanged by push-only run)", got, "v2-local")
+	}
+	if got := getSecret(t, ctx, env.remote, "API_KEY").Value; got != "v2-remote" {
+		t.Fatalf("remote Value = %q, want %q (unchanged by push-only run)", got, "v2-remote")
+	}
+
+	// The same strategy with both directions converges.
+	if _, err := New(env.local, env.remote, Options{Strategy: ConflictPreferRemote, Clock: fixedClock(t3)}).Sync(ctx, false); err != nil {
+		t.Fatalf("both-direction Sync() error = %v", err)
+	}
+	if got := getSecret(t, ctx, env.local, "API_KEY").Value; got != "v2-remote" {
+		t.Fatalf("local Value after both sync = %q, want %q", got, "v2-remote")
+	}
+}
+
+// Both directions in one run: concurrent edits on different secrets produce no
+// conflict — each side's change is applied to the other in a single reconcile.
+func TestBothDirectionConvergesConcurrentEdits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	t2 := t0.Add(2 * time.Hour)
+	t3 := t0.Add(3 * time.Hour)
+
+	seedSecret(t, ctx, env.local, "API_KEY", "a1", t0)
+	engine := New(env.local, env.remote, Options{Clock: fixedClock(t1)})
+	if _, err := engine.Sync(ctx, false); err != nil {
+		t.Fatalf("initial Sync() error = %v", err)
+	}
+
+	// After the baseline sync, local edits A while remote adds B.
+	editSecret(t, ctx, env.local, "API_KEY", "a2-local", t2)
+	seedSecret(t, ctx, env.remote, "DB_PASSWORD", "b1", t3)
+
+	plan := syncPlan(t, env, Options{Clock: fixedClock(t3)})
+	if len(plan.Push) != 1 || len(plan.Pull) != 1 {
+		t.Fatalf("plan = %d pushes, %d pulls; want 1 each", len(plan.Push), len(plan.Pull))
+	}
+	if plan.Detected != 0 || len(plan.Conflicts) != 0 {
+		t.Fatalf("plan conflicts = %d detected/%d listed; want 0/0 (different keys)", plan.Detected, len(plan.Conflicts))
+	}
+
+	res, err := New(env.local, env.remote, Options{Clock: fixedClock(t3)}).Sync(ctx, false)
+	if err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.OperationsApplied != 2 || res.ConflictsDetected != 0 {
+		t.Fatalf("result = %d applied, %d conflicts; want 2 and 0", res.OperationsApplied, res.ConflictsDetected)
+	}
+
+	// Both changes landed on the opposite side.
+	if got := getSecret(t, ctx, env.remote, "API_KEY").Value; got != "a2-local" {
+		t.Fatalf("remote API_KEY = %q, want %q", got, "a2-local")
+	}
+	if got := getSecret(t, ctx, env.local, "DB_PASSWORD").Value; got != "b1" {
+		t.Fatalf("local DB_PASSWORD = %q, want %q", got, "b1")
+	}
+
+	// A follow-up run is a full no-op.
+	again := syncPlan(t, env, Options{Clock: fixedClock(t3)})
+	if len(again.Push)+len(again.Pull)+len(again.Conflicts) != 0 {
+		t.Fatalf("follow-up plan not empty: %+v", again)
+	}
+}
+
+// A project-scoped push only reconciles the scoped project; out-of-scope
+// projects stay untouched until their own scoped run.
+func TestScopeLimitsPushToScopedProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedSecretIn(t, ctx, env.local, "alpha", "development", "ALPHA_KEY", "alpha-value", t0)
+	seedSecretIn(t, ctx, env.local, "beta", "development", "BETA_KEY", "beta-value", t0)
+
+	// Push only the alpha project.
+	alphaScope := Scope{ProjectName: "alpha"}
+	if _, err := New(env.local, env.remote, Options{Direction: DirectionPush, Scope: alphaScope, Clock: fixedClock(t0)}).Sync(ctx, false); err != nil {
+		t.Fatalf("alpha-scoped Sync() error = %v", err)
+	}
+
+	if got := getSecretIn(t, ctx, env.remote, "alpha", "development", "ALPHA_KEY").Value; got != "alpha-value" {
+		t.Fatalf("remote alpha ALPHA_KEY = %q, want %q", got, "alpha-value")
+	}
+	// Beta was not created on the remote at all.
+	if _, err := env.remote.GetProjectByName(ctx, "beta"); err == nil {
+		t.Fatal("remote beta project exists after alpha-only push")
+	}
+
+	// A beta-scoped push converges the second project.
+	if _, err := New(env.local, env.remote, Options{Direction: DirectionPush, Scope: Scope{ProjectName: "beta"}, Clock: fixedClock(t0)}).Sync(ctx, false); err != nil {
+		t.Fatalf("beta-scoped Sync() error = %v", err)
+	}
+	if got := getSecretIn(t, ctx, env.remote, "beta", "development", "BETA_KEY").Value; got != "beta-value" {
+		t.Fatalf("remote beta BETA_KEY = %q, want %q", got, "beta-value")
+	}
+
+	// Fully converged: an unscoped plan has nothing left to do.
+	plan := syncPlan(t, env, Options{Clock: fixedClock(t0)})
+	if len(plan.Push)+len(plan.Pull)+len(plan.Conflicts) != 0 {
+		t.Fatalf("unscoped plan not empty after scoped convergence: %+v", plan)
+	}
+}
+
+// An environment-scoped push reconciles only the scoped environment; other
+// environments of the same project are left for their own runs.
+func TestScopeEnvironmentLimitsSync(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(t, ctx)
+
+	t0 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedSecretIn(t, ctx, env.local, "envproj", "development", "DEV_KEY", "dev-value", t0)
+	seedSecretIn(t, ctx, env.local, "envproj", "production", "PROD_KEY", "prod-value", t0)
+
+	prodScope := Scope{ProjectName: "envproj", EnvironmentName: "production"}
+	if _, err := New(env.local, env.remote, Options{Direction: DirectionPush, Scope: prodScope, Clock: fixedClock(t0)}).Sync(ctx, false); err != nil {
+		t.Fatalf("prod-scoped Sync() error = %v", err)
+	}
+
+	// Production secret pushed; development secret still local-only.
+	if got := getSecretIn(t, ctx, env.remote, "envproj", "production", "PROD_KEY").Value; got != "prod-value" {
+		t.Fatalf("remote PROD_KEY = %q, want %q", got, "prod-value")
+	}
+	if _, err := getSecretErrIn(t, ctx, env.remote, "envproj", "development", "DEV_KEY"); err == nil {
+		t.Fatal("remote DEV_KEY exists after production-only push")
+	}
+
+	// Development remains pending in its own scope.
+	devPlan := syncPlan(t, env, Options{Scope: Scope{ProjectName: "envproj", EnvironmentName: "development"}, Clock: fixedClock(t0)})
+	if len(devPlan.Push) != 1 || devPlan.Push[0].Kind != OpUpsertRemote {
+		t.Fatalf("dev-scoped plan = %+v, want one upsert-remote for DEV_KEY", devPlan.Push)
+	}
+
+	// A dev-scoped push converges it.
+	if _, err := New(env.local, env.remote, Options{Direction: DirectionPush, Scope: Scope{ProjectName: "envproj", EnvironmentName: "development"}, Clock: fixedClock(t0)}).Sync(ctx, false); err != nil {
+		t.Fatalf("dev-scoped Sync() error = %v", err)
+	}
+	if got := getSecretIn(t, ctx, env.remote, "envproj", "development", "DEV_KEY").Value; got != "dev-value" {
+		t.Fatalf("remote DEV_KEY = %q, want %q", got, "dev-value")
 	}
 }
