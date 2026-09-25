@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"os"
+	"unicode"
 
 	"golang.org/x/term"
 )
@@ -18,13 +19,57 @@ func PromptPassword(prompt string) (string, error) {
 	return string(password), nil
 }
 
-// ValidatePassword checks password rules (minimum length, etc.).
+// ValidatePassword checks password rules: minimum 8 characters, at least one
+// uppercase letter, one lowercase letter, one digit, and one special character.
 func ValidatePassword(password string) error {
 	if len(password) < 8 {
 		return fmt.Errorf("password must be at least 8 characters")
 	}
-	// Add more rules as needed (e.g., complexity, symbols, etc.)
+
+	var hasUpper, hasLower, hasDigit, hasSpecial bool
+	for _, r := range password {
+		switch {
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			hasSpecial = true
+		}
+	}
+
+	var missing []string
+	if !hasUpper {
+		missing = append(missing, "an uppercase letter")
+	}
+	if !hasLower {
+		missing = append(missing, "a lowercase letter")
+	}
+	if !hasDigit {
+		missing = append(missing, "a digit")
+	}
+	if !hasSpecial {
+		missing = append(missing, "a special character")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("password must contain at least %s", formatMissing(missing))
+	}
+
 	return nil
+}
+
+func formatMissing(items []string) string {
+	switch len(items) {
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return items[0] + ", " + formatMissing(items[1:])
+	}
 }
 
 // ConfirmPassword prompts for confirmation and checks if it matches the original password.

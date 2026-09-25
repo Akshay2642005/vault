@@ -29,6 +29,7 @@ Examples:
   vault run myapp/prod -- python app.py
   vault run myapp/staging -- bash -c "echo $DATABASE_URL"
   vault run myapp/dev -- powershell -Command "echo $env:DATABASE_URL"
+  vault run myapp/dev --dry-run -- npm run dev   # preview without executing
 `,
 		Args:               cobra.MinimumNArgs(2),
 		RunE:               runRun,
@@ -39,6 +40,18 @@ Examples:
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	// Check for --dry-run flag (manual parsing since DisableFlagParsing is true)
+	dryRun := false
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--dry-run" {
+			dryRun = true
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+	args = filtered
+
 	// Find the "--" separator
 	sepIdx := -1
 	for i, arg := range args {
@@ -48,7 +61,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if sepIdx == -1 || sepIdx == 0 || sepIdx == len(args)-1 {
-		return fmt.Errorf("usage: vault run <project>/<environment> -- <command> [args...]")
+		return fmt.Errorf("usage: vault run <project>/<environment> [--dry-run] -- <command> [args...]")
 	}
 
 	path := args[0]
@@ -106,6 +119,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	env := os.Environ()
 	for _, secret := range secrets {
 		env = append(env, fmt.Sprintf("%s=%s", secret.Key, secret.Value))
+	}
+
+	// Dry-run: print the environment variables and command without executing
+	if dryRun {
+		fmt.Printf("Dry run: %d secrets would be injected into:\n", len(secrets))
+		fmt.Printf("  %s\n\n", strings.Join(commandArgs, " "))
+		fmt.Println("Environment variables:")
+		for _, secret := range secrets {
+			fmt.Printf("  %s=%s\n", secret.Key, secret.Value)
+		}
+		return nil
 	}
 
 	// Detect shell if the command is a shell built-in or a string

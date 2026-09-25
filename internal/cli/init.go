@@ -3,13 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"vault/internal/auth"
 	"vault/internal/config"
 	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // NewInitCmd creates the init command
@@ -50,27 +49,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get master password
-	fmt.Print("Enter master password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	password, err := auth.PromptPassword("Enter master password: ")
 	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
+		return err
 	}
-	fmt.Println()
 
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
+	if err := auth.ValidatePassword(password); err != nil {
+		return err
 	}
 
 	// Confirm password
-	fmt.Print("Confirm master password: ")
-	confirm, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
-	}
-	fmt.Println()
-
-	if string(password) != string(confirm) {
-		return fmt.Errorf("passwords do not match")
+	if err := auth.ConfirmPassword(password); err != nil {
+		return err
 	}
 
 	// Create vault

@@ -629,7 +629,7 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 
 		// Mark sync metadata.
 		t := now()
-		newSecret.SyncStatus = domain.SyncStatusInSynced
+		newSecret.SyncStatus = domain.SyncStatusInSync
 		newSecret.LastSyncedAt = &t
 
 		if err := dst.CreateSecret(ctx, newSecret); err != nil {
@@ -656,7 +656,7 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 
 	// Mark sync metadata.
 	t := now()
-	existing.SyncStatus = domain.SyncStatusInSynced
+	existing.SyncStatus = domain.SyncStatusInSync
 	existing.LastSyncedAt = &t
 
 	if err := dst.UpdateSecret(ctx, existing); err != nil {

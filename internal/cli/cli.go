@@ -53,6 +53,9 @@ across multiple backends with powerful Lua-based configuration.`,
 	rootCmd.AddCommand(NewRestoreCmd())
 	rootCmd.AddCommand(NewRunCmd())
 	rootCmd.AddCommand(NewSyncCmd())
+	rootCmd.AddCommand(NewShowCmd())
+	rootCmd.AddCommand(NewDiffCmd())
+	rootCmd.AddCommand(NewRotateCmd())
 
 	return rootCmd
 }

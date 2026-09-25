@@ -11,7 +11,7 @@ import (
 	"vault/internal/config"
 	"vault/internal/crypto"
 	"vault/internal/domain"
-	"vault/internal/storage/sqlite"
+	"vault/internal/storage"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -91,17 +91,12 @@ func runSet(cmd *cobra.Command, args []string) error {
 	// Always use PRIMARY storage as the system of record
 	cfg := config.GetPrimaryStorageConfig()
 
-	// Create storage backend
-	backend, err := sqlite.New(cfg)
+	// Create storage backend using factory
+	backend, err := storage.NewBackend(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage backend: %w", err)
 	}
 	defer backend.Close()
-
-	// Initialize backend
-	if err := backend.Initialize(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to initialize backend: %w", err)
-	}
 
 	// Unlock vault
 	password, err := auth.PromptPassword("Enter master password: ")

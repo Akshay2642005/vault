@@ -4,7 +4,7 @@ import "time"
 
 type Conflict struct {
 	ID           string            `json:"id"`
-	SecretID     string            `json:"secred_id"`
+	SecretID     string            `json:"secret_id"`
 	LocalChange  *Change           `json:"local_change"`
 	RemoteChange *Change           `json:"remote_change"`
 	DetectedAt   time.Time         `json:"detected_at"`

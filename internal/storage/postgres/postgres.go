@@ -364,11 +364,19 @@ func (t *postgresTx) Rollback() error {
 }
 
 // Export exports the entire vault
+//
+// Values are exported in their encrypted (at-rest) form together with the
+// vault's salt and auth hash, so the resulting dump can be imported into
+// another backend and unlocked with the same master password.
 func (b *Backend) Export(ctx context.Context) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
+	return b.exportVault(ctx)
 }
 
-// Import imports vault data
+// Import imports vault data, replacing the contents of the current vault.
+//
+// Imported values are stored exactly as they appear in the dump (still
+// encrypted). After import the caller must re-unlock the vault with the
+// master password that matches the imported metadata.
 func (b *Backend) Import(ctx context.Context, data []byte) error {
-	return fmt.Errorf("not implemented")
+	return b.importVault(ctx, data)
 }

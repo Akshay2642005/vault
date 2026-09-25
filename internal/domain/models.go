@@ -39,8 +39,8 @@ type SyncStatus string
 
 const (
 	SyncStatusPending    SyncStatus = "pending"
-	SyncStatusInSynced   SyncStatus = "synced"
-	SyncStatusConfilct   SyncStatus = "conflict"
+	SyncStatusInSync     SyncStatus = "synced"
+	SyncStatusConflict   SyncStatus = "conflict"
 	SyncStatusFailed     SyncStatus = "failed"
 	SyncStatusNotEnabled SyncStatus = "not_enabled"
 )
