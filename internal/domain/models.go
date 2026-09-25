@@ -43,6 +43,9 @@ const (
 	SyncStatusConflict   SyncStatus = "conflict"
 	SyncStatusFailed     SyncStatus = "failed"
 	SyncStatusNotEnabled SyncStatus = "not_enabled"
+
+	// SyncStatusDryRun marks a sync run that generated a plan but applied nothing.
+	SyncStatusDryRun SyncStatus = "dry_run"
 )
 
 type Secret struct {
@@ -136,6 +139,25 @@ type Tombstone struct {
 	Checksum    string    `json:"checksum"`
 	DeletedAt   time.Time `json:"deleted_at"`
 	DeletedBy   string    `json:"deleted_by"`
+}
+
+// SyncRun records a single sync execution for observability: when it ran, in
+// which direction, with which flags, and what happened (ops applied, conflicts
+// detected, and any error). It is metadata only — never secret material — and
+// does not require vault unlock to query.
+type SyncRun struct {
+	ID         string     `json:"id"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt time.Time  `json:"finished_at"`
+	Direction  string     `json:"direction"`
+	Strategy   string     `json:"strategy"`
+	Scope      string     `json:"scope,omitempty"` // "project/env" or "project" or empty for all
+	Status     SyncStatus `json:"status"`          // synced | conflict | failed | dry_run
+	DryRun     bool       `json:"dry_run"`
+	Pushed     int        `json:"pushed"`
+	Pulled     int        `json:"pulled"`
+	Conflicts  int        `json:"conflicts"`
+	Error      string     `json:"error,omitempty"`
 }
 
 type Store struct {

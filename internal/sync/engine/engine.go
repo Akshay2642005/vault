@@ -133,6 +133,12 @@ type Plan struct {
 	Pull []Operation // remote -> local
 
 	Conflicts []Conflict
+
+	// Detected is the number of conflicts found before the conflict strategy
+	// was applied. Strategies like prefer-local resolve conflicts into ops, so
+	// len(Conflicts) can be 0 while Detected still reports what was found.
+	// Sync run history uses Detected for observability.
+	Detected int
 }
 
 type OperationKind string
@@ -389,6 +395,7 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 
 	// Apply conflict strategy by transforming conflicts into ops when possible.
 	if len(plan.Conflicts) > 0 {
+		plan.Detected = len(plan.Conflicts)
 		if err := e.applyConflictStrategy(&plan); err != nil {
 			return plan, err
 		}
@@ -408,7 +415,7 @@ func (e *Engine) Sync(ctx context.Context, dryRun bool) (Result, error) {
 		Plan:              plan,
 		Applied:           false,
 		OperationsApplied: 0,
-		ConflictsDetected: len(plan.Conflicts),
+		ConflictsDetected: plan.Detected,
 	}
 
 	if dryRun {

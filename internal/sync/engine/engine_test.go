@@ -357,6 +357,9 @@ func TestConflictBothSidesChanged(t *testing.T) {
 	if len(plan.Conflicts) != 1 {
 		t.Fatalf("len(plan.Conflicts) = %d, want 1", len(plan.Conflicts))
 	}
+	if plan.Detected != 1 {
+		t.Fatalf("plan.Detected = %d, want 1", plan.Detected)
+	}
 	c := plan.Conflicts[0]
 	if c.Local.Value != "v2-local" || c.Remote.Value != "v2-remote" {
 		t.Fatalf("conflict snapshots wrong: local=%q remote=%q", c.Local.Value, c.Remote.Value)
@@ -398,13 +401,20 @@ func TestPreferLatestResolvesByRecency(t *testing.T) {
 	if len(plan.Conflicts) != 0 {
 		t.Fatalf("prefer-latest left %d unresolved conflicts", len(plan.Conflicts))
 	}
+	if plan.Detected != 1 {
+		t.Fatalf("plan.Detected = %d, want 1 (conflict was detected then resolved)", plan.Detected)
+	}
 	if len(plan.Pull) != 1 {
 		t.Fatalf("len(plan.Pull) = %d, want 1 (remote is newer)", len(plan.Pull))
 	}
 
 	engine2 := New(env.local, env.remote, Options{Strategy: ConflictPreferLatest, Clock: fixedClock(t3)})
-	if _, err := engine2.Sync(ctx, false); err != nil {
+	res, err := engine2.Sync(ctx, false)
+	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
+	}
+	if res.ConflictsDetected != 1 {
+		t.Fatalf("result.ConflictsDetected = %d, want 1 (reported from pre-resolution count)", res.ConflictsDetected)
 	}
 	if got := getSecret(t, ctx, env.local, "API_KEY").Value; got != "v3-remote" {
 		t.Fatalf("local Value = %q, want %q (prefer-latest should keep the newer edit)", got, "v3-remote")

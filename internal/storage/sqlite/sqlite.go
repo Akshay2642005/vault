@@ -64,6 +64,14 @@ func (b *Backend) Initialize(ctx context.Context, config *storage.Config) error 
 		}
 	}
 
+	// Ensure the full schema exists. Every statement uses CREATE ... IF NOT
+	// EXISTS, so this is idempotent: it upgrades pre-existing vaults (e.g. the
+	// sync_runs observability table) without touching existing data, just as
+	// the Postgres backend applies migrations on open.
+	if err := b.createSchema(ctx); err != nil {
+		return fmt.Errorf("failed to ensure schema: %w", err)
+	}
+
 	return nil
 }
 
@@ -247,6 +255,22 @@ func (b *Backend) createSchema(ctx context.Context) error {
 		UNIQUE(project_id, environment, key)
 	);
 
+	-- Sync run history (observability, metadata only)
+	CREATE TABLE IF NOT EXISTS sync_runs (
+		id TEXT PRIMARY KEY,
+		started_at TIMESTAMP NOT NULL,
+		finished_at TIMESTAMP NOT NULL,
+		direction TEXT NOT NULL,
+		strategy TEXT NOT NULL,
+		scope TEXT,
+		status TEXT NOT NULL,
+		dry_run BOOLEAN NOT NULL DEFAULT 0,
+		pushed INTEGER NOT NULL DEFAULT 0,
+		pulled INTEGER NOT NULL DEFAULT 0,
+		conflicts INTEGER NOT NULL DEFAULT 0,
+		error TEXT
+	);
+
 	-- Indices for common queries
 	CREATE INDEX IF NOT EXISTS idx_secrets_project ON secrets(project_id);
 	CREATE INDEX IF NOT EXISTS idx_secrets_env ON secrets(environment);
@@ -255,6 +279,7 @@ func (b *Backend) createSchema(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_secrets_expires ON secrets(expires_at);
 	CREATE INDEX IF NOT EXISTS idx_secrets_rotate ON secrets(rotate_at);
 	CREATE INDEX IF NOT EXISTS idx_secret_versions_secret ON secret_versions(secret_id);
+	CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON sync_runs(started_at DESC);
 
 	-- Full-text search
 	CREATE VIRTUAL TABLE IF NOT EXISTS secrets_fts USING fts5(

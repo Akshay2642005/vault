@@ -39,6 +39,14 @@ type Backend interface {
 	// DeleteTombstone removes the deletion record for a secret identity,
 	// typically because the secret was recreated and synced again.
 	DeleteTombstone(ctx context.Context, projectID, environment, key string) error
+
+	// RecordSyncRun persists an observability record for a sync execution.
+	// Sync runs are metadata only (no secret material) and do not require
+	// vault unlock to write or read.
+	RecordSyncRun(ctx context.Context, run *domain.SyncRun) error
+
+	// ListSyncRuns returns the limit most recent sync runs, newest first.
+	ListSyncRuns(ctx context.Context, limit int) ([]*domain.SyncRun, error)
 	ListSecrets(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	ListSecretMetadata(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	SearchSecrets(ctx context.Context, query string) ([]*domain.Secret, error)

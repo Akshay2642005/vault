@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"vault/internal/auth"
 	synccli "vault/internal/cli/sync"
 	"vault/internal/config"
+	"vault/internal/domain"
 	"vault/internal/storage"
 	"vault/internal/storage/roles"
 	syncengine "vault/internal/sync/engine"
@@ -22,6 +25,7 @@ var (
 	syncFlagApprove      bool
 	syncFlagDeleteRemote bool
 	syncFlagDeleteLocal  bool
+	syncFlagStatusLimit  int
 )
 
 // NewSyncCmd creates the sync command.
@@ -69,6 +73,7 @@ Approval:
 
 	cmd.AddCommand(NewSyncEnableCmd())
 	cmd.AddCommand(NewSyncRunCmd())
+	cmd.AddCommand(NewSyncStatusCmd())
 
 	return cmd
 }
@@ -91,6 +96,85 @@ func NewSyncRunCmd() *cobra.Command {
 	runCmd.Flags().BoolVar(&syncFlagDeleteLocal, "delete-local", false, "DANGEROUS: When pulling, delete local secrets that were deleted on the remote (recorded as tombstones). Requires interactive confirmation and cannot be used with --approve.")
 
 	return runCmd
+}
+
+// NewSyncStatusCmd shows recent sync run history recorded on the primary
+// backend. It is metadata-only and does not require the master password.
+func NewSyncStatusCmd() *cobra.Command {
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show recent sync run history (no master password required)",
+		Long: `Show the most recent sync runs recorded on the primary vault.
+
+Each run records when it started, its direction/strategy, how many operations
+were pushed/pulled, how many conflicts were detected, and any error. Sync runs
+are metadata only — no secret material — so this works without unlocking.`,
+		Args: cobra.NoArgs,
+		RunE: runSyncStatus,
+	}
+
+	statusCmd.Flags().IntVar(&syncFlagStatusLimit, "limit", 10, "Number of recent runs to show (max 500)")
+
+	return statusCmd
+}
+
+func runSyncStatus(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	primaryCfg := config.GetPrimaryStorageConfig()
+	if err := roles.ValidatePrimary(primaryCfg); err != nil {
+		return err
+	}
+
+	local, err := storage.NewBackend(primaryCfg)
+	if err != nil {
+		return fmt.Errorf("failed to open primary backend: %w", err)
+	}
+	defer local.Close()
+
+	runs, err := local.ListSyncRuns(ctx, syncFlagStatusLimit)
+	if err != nil {
+		return fmt.Errorf("failed to read sync run history: %w", err)
+	}
+
+	synccli.RenderSyncRuns(runs)
+	return nil
+}
+
+// recordSyncRun persists an observability record of a sync execution on the
+// primary backend. It never fails the command: observability must not break
+// sync itself, so failures are downgraded to a warning on stderr.
+func recordSyncRun(ctx context.Context, backend storage.Backend, started time.Time, dir syncengine.Direction, strategy syncengine.ConflictStrategy, scope syncengine.Scope, plan syncengine.Plan, status domain.SyncStatus, dryRun bool, applyErr error) {
+	run := &domain.SyncRun{
+		ID:         domain.GenerateID(),
+		StartedAt:  started,
+		FinishedAt: time.Now(),
+		Direction:  string(dir),
+		Strategy:   string(strategy),
+		Scope:      scopeString(scope),
+		Status:     status,
+		DryRun:     dryRun,
+		Pushed:     len(plan.Push),
+		Pulled:     len(plan.Pull),
+		Conflicts:  plan.Detected,
+	}
+	if applyErr != nil {
+		run.Error = applyErr.Error()
+	}
+	if err := backend.RecordSyncRun(ctx, run); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to record sync run: %v\n", err)
+	}
+}
+
+func scopeString(scope syncengine.Scope) string {
+	switch {
+	case scope.ProjectName != "" && scope.EnvironmentName != "":
+		return scope.ProjectName + "/" + scope.EnvironmentName
+	case scope.ProjectName != "":
+		return scope.ProjectName
+	default:
+		return ""
+	}
 }
 
 // NewSyncEnableCmd initializes the configured Postgres sync target vault using the SAME master password
@@ -176,6 +260,7 @@ func runSyncEnable(cmd *cobra.Command, args []string) error {
 
 func runSync(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	started := time.Now()
 
 	primaryCfg := config.GetPrimaryStorageConfig()
 	if err := roles.ValidatePrimary(primaryCfg); err != nil {
@@ -260,6 +345,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if len(plan.Pull) > 0 || len(plan.Push) > 0 || len(plan.Conflicts) > 0 {
 			synccli.RenderPlan(plan)
 		}
+		recordSyncRun(ctx, local, started, dir, strategy, scope, plan, domain.SyncStatusFailed, false, err)
 		return err
 	}
 
@@ -268,6 +354,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	fmt.Print(planText)
 
 	if syncFlagDryRun {
+		recordSyncRun(ctx, local, started, dir, strategy, scope, plan, domain.SyncStatusDryRun, true, nil)
 		synccli.RenderResult(syncengine.Result{Plan: plan, Applied: false})
 		return nil
 	}
@@ -294,8 +381,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// This flag only controls CLI safety/UX gating here.
 	res, err := engine.Sync(ctx, false)
 	if err != nil {
+		recordSyncRun(ctx, local, started, dir, strategy, scope, plan, domain.SyncStatusFailed, false, err)
 		return err
 	}
+
+	status := domain.SyncStatusInSync
+	if plan.Detected > 0 {
+		// The run surfaced conflicts; the configured strategy either resolved
+		// them into operations or the run was scoped to detect them. Report
+		// truthfully via the conflict status.
+		status = domain.SyncStatusConflict
+	}
+	recordSyncRun(ctx, local, started, dir, strategy, scope, res.Plan, status, false, nil)
 
 	synccli.RenderResult(res)
 	return nil

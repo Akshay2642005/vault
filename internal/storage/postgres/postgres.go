@@ -339,6 +339,22 @@ CREATE TABLE IF NOT EXISTS secret_tombstones (
 	UNIQUE(project_id, environment, key)
 );
 
+-- Sync run history (observability, metadata only)
+CREATE TABLE IF NOT EXISTS sync_runs (
+	id TEXT PRIMARY KEY,
+	started_at TIMESTAMP NOT NULL,
+	finished_at TIMESTAMP NOT NULL,
+	direction TEXT NOT NULL,
+	strategy TEXT NOT NULL,
+	scope TEXT,
+	status TEXT NOT NULL,
+	dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+	pushed INTEGER NOT NULL DEFAULT 0,
+	pulled INTEGER NOT NULL DEFAULT 0,
+	conflicts INTEGER NOT NULL DEFAULT 0,
+	error TEXT
+);
+
 -- Indices
 CREATE INDEX IF NOT EXISTS idx_secrets_project ON secrets(project_id);
 CREATE INDEX IF NOT EXISTS idx_secrets_env ON secrets(environment);
@@ -347,6 +363,7 @@ CREATE INDEX IF NOT EXISTS idx_secrets_updated ON secrets(updated_at);
 CREATE INDEX IF NOT EXISTS idx_secrets_expires ON secrets(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_secrets_rotate ON secrets(rotate_at) WHERE rotate_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_secret_versions_secret ON secret_versions(secret_id);
+CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON sync_runs(started_at DESC);
 
 -- Full-text search (PostgreSQL native)
 CREATE INDEX IF NOT EXISTS idx_secrets_key_gin ON secrets USING gin(to_tsvector('english', key));

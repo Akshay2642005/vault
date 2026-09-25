@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"vault/internal/domain"
 	syncengine "vault/internal/sync/engine"
 )
 
@@ -169,4 +170,38 @@ func RenderResult(res syncengine.Result) {
 		return
 	}
 	fmt.Printf("\n✓ Sync complete (applied %d operations, detected %d conflicts)\n", res.OperationsApplied, res.ConflictsDetected)
+}
+
+// RenderSyncRuns prints a compact history table of the most recent sync runs.
+// Runs are metadata only, so this never needs vault unlock.
+func RenderSyncRuns(runs []*domain.SyncRun) {
+	if len(runs) == 0 {
+		fmt.Println("No sync runs recorded yet. Run 'vault sync run --approve' to perform a sync.")
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("Sync run history (newest first)\n")
+	b.WriteString("--------------------------------\n")
+	fmt.Fprintf(&b, "  %-6s %-19s %-9s %-8s %-8s %-9s  %s\n", "STATUS", "STARTED (UTC)", "DIR", "PUSH", "PULL", "CONFLICTS", "SCOPE / NOTES")
+
+	for _, r := range runs {
+		status := string(r.Status)
+		if r.DryRun {
+			status = "dry-run"
+		}
+		note := r.Scope
+		if r.Error != "" {
+			if note != "" {
+				note = note + ": " + r.Error
+			} else {
+				note = r.Error
+			}
+		}
+		fmt.Fprintf(&b, "  %-6s %-19s %-9s %-8d %-8d %-9d  %s\n",
+			status, r.StartedAt.UTC().Format("2006-01-02 15:04:05"),
+			r.Direction, r.Pushed, r.Pulled, r.Conflicts, note)
+	}
+
+	fmt.Print(b.String())
 }
