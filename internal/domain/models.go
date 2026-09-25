@@ -124,6 +124,20 @@ type SecretVersion struct {
 	Checksum  string    `json:"checksum"`
 }
 
+// Tombstone remembers that a secret identity was deleted, so a sync engine can
+// distinguish "deleted on this side" from "never present" (scoping, restore,
+// partial sync). It carries the checksum of the value at deletion time and the
+// identity (project/environment/key), never the value itself.
+type Tombstone struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Environment string    `json:"environment"`
+	Key         string    `json:"key"`
+	Checksum    string    `json:"checksum"`
+	DeletedAt   time.Time `json:"deleted_at"`
+	DeletedBy   string    `json:"deleted_by"`
+}
+
 type Store struct {
 	Version  int       `json:"version"`
 	Salt     string    `json:"salt"`

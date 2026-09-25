@@ -111,6 +111,63 @@ func TestMarkSyncedSetsSyncMetadataWithoutBumpingVersion(t *testing.T) {
 	}
 }
 
+func TestDeleteSecretRecordsTombstone(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	backend := newTestBackend(t, ctx)
+
+	project, err := domain.NewProject("tombproj", "tombstone project", "test")
+	if err != nil {
+		t.Fatalf("NewProject() error = %v", err)
+	}
+	if err := backend.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	secret, err := domain.NewSecret(project.ID, "development", "API_KEY", "s3cr3t", domain.SecretTypeAPIKey, "test")
+	if err != nil {
+		t.Fatalf("NewSecret() error = %v", err)
+	}
+	secret.Checksum = crypto.Hash([]byte(secret.Value))
+	if err := backend.CreateSecret(ctx, secret); err != nil {
+		t.Fatalf("CreateSecret() error = %v", err)
+	}
+
+	if err := backend.DeleteSecret(ctx, secret.ID); err != nil {
+		t.Fatalf("DeleteSecret() error = %v", err)
+	}
+
+	got, err := backend.GetTombstone(ctx, project.ID, "development", "API_KEY")
+	if err != nil {
+		t.Fatalf("GetTombstone() error = %v", err)
+	}
+	if got.Key != "API_KEY" || got.ProjectID != project.ID || got.Environment != "development" {
+		t.Fatalf("tombstone identity wrong: %+v", got)
+	}
+	if got.Checksum != crypto.Hash([]byte("s3cr3t")) {
+		t.Fatalf("tombstone checksum = %q, want %q", got.Checksum, crypto.Hash([]byte("s3cr3t")))
+	}
+	if got.DeletedAt.IsZero() {
+		t.Fatalf("tombstone missing deleted_at: %+v", got)
+	}
+
+	list, err := backend.ListTombstones(ctx, project.ID, "development")
+	if err != nil {
+		t.Fatalf("ListTombstones() error = %v", err)
+	}
+	if len(list) != 1 || list[0].Key != "API_KEY" {
+		t.Fatalf("ListTombstones() = %+v, want 1 with API_KEY", list)
+	}
+
+	if err := backend.DeleteTombstone(ctx, project.ID, "development", "API_KEY"); err != nil {
+		t.Fatalf("DeleteTombstone() error = %v", err)
+	}
+	if _, err := backend.GetTombstone(ctx, project.ID, "development", "API_KEY"); err == nil {
+		t.Fatal("tombstone still present after DeleteTombstone")
+	}
+}
+
 func TestSearchSecretMetadataSkipsDecryption(t *testing.T) {
 	t.Parallel()
 

@@ -234,6 +234,19 @@ func (b *Backend) createSchema(ctx context.Context) error {
 		UNIQUE(secret_id, version)
 	);
 
+	-- Secret tombstones (deletion records for sync propagation)
+	CREATE TABLE IF NOT EXISTS secret_tombstones (
+		id TEXT PRIMARY KEY,
+		project_id TEXT NOT NULL,
+		environment TEXT NOT NULL,
+		key TEXT NOT NULL,
+		checksum TEXT,
+		deleted_at TIMESTAMP NOT NULL,
+		deleted_by TEXT,
+		FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+		UNIQUE(project_id, environment, key)
+	);
+
 	-- Indices for common queries
 	CREATE INDEX IF NOT EXISTS idx_secrets_project ON secrets(project_id);
 	CREATE INDEX IF NOT EXISTS idx_secrets_env ON secrets(environment);

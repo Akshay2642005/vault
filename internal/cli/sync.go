@@ -21,6 +21,7 @@ var (
 	syncFlagSince        string
 	syncFlagApprove      bool
 	syncFlagDeleteRemote bool
+	syncFlagDeleteLocal  bool
 )
 
 // NewSyncCmd creates the sync command.
@@ -51,6 +52,16 @@ Conflict strategies:
 - prefer-remote: remote wins
 - prefer-latest: chooses the newest by UpdatedAt (cannot resolve exact ties)
 
+Deletion propagation:
+- Deleted secrets are remembered as tombstones, so a pull never resurrects
+  a locally-deleted secret and a push never restores a remotely-deleted one.
+- --delete-remote: when pushing, also remove remote copies that are missing
+  locally (deleted locally or never present).
+- --delete-local: when pulling, also remove local copies that were deleted
+  on the remote (carry a remote tombstone).
+- Both delete flags are destructive, always require interactive confirmation,
+  and refuse to run with --approve.
+
 Approval:
 - By default, applying changes requires explicit confirmation.
 - Use --approve to skip the interactive prompt.`,
@@ -76,7 +87,8 @@ func NewSyncRunCmd() *cobra.Command {
 	runCmd.Flags().BoolVar(&syncFlagDryRun, "dry-run", false, "Print planned operations without applying changes")
 	runCmd.Flags().StringVar(&syncFlagSince, "since", "", "Only consider changes since RFC3339 time (e.g. 2026-03-01T00:00:00Z). Optional.")
 	runCmd.Flags().BoolVar(&syncFlagApprove, "approve", false, "Approve the sync plan and apply changes without prompting")
-	runCmd.Flags().BoolVar(&syncFlagDeleteRemote, "delete-remote", false, "DANGEROUS: When pushing, delete remote secrets that are missing locally (delete-by-absence). Requires interactive confirmation and cannot be used with --approve.")
+	runCmd.Flags().BoolVar(&syncFlagDeleteRemote, "delete-remote", false, "DANGEROUS: When pushing, delete remote secrets that are missing locally (deleted locally or never present). Requires interactive confirmation and cannot be used with --approve.")
+	runCmd.Flags().BoolVar(&syncFlagDeleteLocal, "delete-local", false, "DANGEROUS: When pulling, delete local secrets that were deleted on the remote (recorded as tombstones). Requires interactive confirmation and cannot be used with --approve.")
 
 	return runCmd
 }
@@ -238,6 +250,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		Scope:               scope,
 		Since:               since,
 		DeleteRemoteMissing: syncFlagDeleteRemote,
+		DeleteLocalMissing:  syncFlagDeleteLocal,
 	})
 
 	plan, err := engine.SyncPlan(ctx)
@@ -260,14 +273,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Hard safety rule:
-	// --delete-remote is destructive and must NEVER be allowed with --approve.
-	if syncFlagDeleteRemote && syncFlagApprove {
-		return fmt.Errorf("refusing to run: --delete-remote cannot be used with --approve (interactive confirmation required)")
+	// --delete-remote/--delete-local are destructive and must NEVER be allowed with --approve.
+	if (syncFlagDeleteRemote || syncFlagDeleteLocal) && syncFlagApprove {
+		return fmt.Errorf("refusing to run: --delete-remote/--delete-local cannot be used with --approve (interactive confirmation required)")
 	}
 
 	// Require explicit approval before applying changes unless --approve is set.
-	// If --delete-remote is enabled, we *always* require interactive confirmation.
-	if syncFlagDeleteRemote {
+	// If either delete flag is enabled, we *always* require interactive confirmation.
+	if syncFlagDeleteRemote || syncFlagDeleteLocal {
 		if err := synccli.ConfirmApplyPlan(plan); err != nil {
 			return fmt.Errorf("sync aborted: %w", err)
 		}

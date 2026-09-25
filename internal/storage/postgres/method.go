@@ -276,11 +276,117 @@ func (b *Backend) MarkSynced(ctx context.Context, secretID string, syncedAt time
 	return nil
 }
 
-// DeleteSecret deletes a secret
+// DeleteSecret deletes a secret and records a tombstone for it, so the sync
+// engine can distinguish a deliberate local deletion from a secret that was
+// never present (scoping, restore, partial sync).
 func (b *Backend) DeleteSecret(ctx context.Context, id string) error {
-	_, err := b.db.ExecContext(ctx, `DELETE FROM secrets WHERE id = $1`, id)
+	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("failed to begin delete transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var projectID, environment, key, checksum, deletedBy string
+	err = tx.QueryRowContext(ctx, `
+		SELECT project_id, environment, key, COALESCE(checksum, ''), COALESCE(updated_by, '')
+		FROM secrets WHERE id = $1
+	`, id).Scan(&projectID, &environment, &key, &checksum, &deletedBy)
+	if err == sql.ErrNoRows {
+		// Already gone: nothing to tombstone or delete.
+		return tx.Commit()
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read secret before delete: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO secret_tombstones (id, project_id, environment, key, checksum, deleted_at, deleted_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT(project_id, environment, key) DO UPDATE SET
+			checksum = excluded.checksum,
+			deleted_at = excluded.deleted_at,
+			deleted_by = excluded.deleted_by
+	`, domain.GenerateID(), projectID, environment, key, checksum, time.Now(), deletedBy); err != nil {
+		return fmt.Errorf("failed to record tombstone: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("failed to delete secret: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// GetTombstone returns the tombstone for a secret identity.
+func (b *Backend) GetTombstone(ctx context.Context, projectID, environment, key string) (*domain.Tombstone, error) {
+	var t domain.Tombstone
+	var checksum, deletedBy sql.NullString
+
+	err := b.db.QueryRowContext(ctx, `
+		SELECT id, project_id, environment, key, checksum, deleted_at, deleted_by
+		FROM secret_tombstones
+		WHERE project_id = $1 AND environment = $2 AND key = $3
+	`, projectID, environment, key).Scan(
+		&t.ID, &t.ProjectID, &t.Environment, &t.Key, &checksum, &t.DeletedAt, &deletedBy,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("tombstone not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tombstone: %w", err)
+	}
+	if checksum.Valid {
+		t.Checksum = checksum.String
+	}
+	if deletedBy.Valid {
+		t.DeletedBy = deletedBy.String
+	}
+	return &t, nil
+}
+
+// ListTombstones lists all tombstones in a project/environment.
+func (b *Backend) ListTombstones(ctx context.Context, projectID, environment string) ([]*domain.Tombstone, error) {
+	rows, err := b.db.QueryContext(ctx, `
+		SELECT id, project_id, environment, key, checksum, deleted_at, deleted_by
+		FROM secret_tombstones
+		WHERE project_id = $1 AND environment = $2
+		ORDER BY key
+	`, projectID, environment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tombstones: %w", err)
+	}
+	defer rows.Close()
+
+	var tombstones []*domain.Tombstone
+	for rows.Next() {
+		var t domain.Tombstone
+		var checksum, deletedBy sql.NullString
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Environment, &t.Key, &checksum, &t.DeletedAt, &deletedBy); err != nil {
+			return nil, fmt.Errorf("failed to scan tombstone: %w", err)
+		}
+		if checksum.Valid {
+			t.Checksum = checksum.String
+		}
+		if deletedBy.Valid {
+			t.DeletedBy = deletedBy.String
+		}
+		tombstones = append(tombstones, &t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate tombstones: %w", err)
+	}
+	return tombstones, nil
+}
+
+// DeleteTombstone removes the tombstone for a secret identity, usually after
+// the secret was recreated and synced again.
+func (b *Backend) DeleteTombstone(ctx context.Context, projectID, environment, key string) error {
+	_, err := b.db.ExecContext(ctx, `
+		DELETE FROM secret_tombstones
+		WHERE project_id = $1 AND environment = $2 AND key = $3
+	`, projectID, environment, key)
+	if err != nil {
+		return fmt.Errorf("failed to delete tombstone: %w", err)
 	}
 	return nil
 }

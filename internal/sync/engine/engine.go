@@ -24,6 +24,9 @@ import (
 //     identity = (project name, environment name, secret key)
 //     equality = checksum match (preferred), otherwise value+metadata compare (best effort)
 //     change   = UpdatedAt later than LastSyncedAt (never-synced secrets count as changed)
+//   - Deletions are tracked via secret_tombstones: a deliberate deletion on one side
+//     is never resurrected by the other, and can optionally propagate with the
+//     DeleteRemoteMissing / DeleteLocalMissing options.
 //
 // With a future change-log, we can replace Snapshot reconciliation with a proper CRDT / vector-clock protocol.
 type Engine struct {
@@ -46,13 +49,25 @@ type Options struct {
 	Since *time.Time
 
 	// DeleteRemoteMissing causes the planner to emit delete operations on the remote
-	// for secrets that exist on the remote but do not exist on the local side.
+	// for secrets that exist on the remote but not on the local side — whether
+	// because the local side has a tombstone for them (deliberately deleted) or
+	// never had them at all (delete by absence).
 	//
-	// This is a "delete by absence" behavior (no tombstones) and is inherently risky:
-	// a missing local secret could be due to scoping, partial sync, or other reasons.
-	//
-	// Callers should gate this behind an explicit user confirmation (and preferably scope it).
+	// A local tombstone ALWAYS prevents pulling the secret back; this flag only
+	// controls whether the surviving remote copy is actively removed. Delete-by-
+	// absence is inherently risky (missing local secrets could be due to scoping
+	// or partial sync), so callers should gate this behind explicit confirmation.
 	DeleteRemoteMissing bool
+
+	// DeleteLocalMissing causes the planner to emit delete operations on the
+	// local side for secrets that exist locally but were deleted on the remote
+	// (the remote carries a tombstone for the identity).
+	//
+	// A remote tombstone ALWAYS prevents pushing the secret back; this flag only
+	// controls whether the surviving local copy is actively removed. It mirrors
+	// DeleteRemoteMissing and is equally risky; callers should gate it behind
+	// explicit user confirmation.
+	DeleteLocalMissing bool
 
 	// Clock allows deterministic tests.
 	Clock func() time.Time
@@ -131,7 +146,10 @@ const (
 	// NOTE: This engine only emits OpDeleteRemote when Options.DeleteRemoteMissing is true.
 	OpDeleteRemote OperationKind = "delete-remote"
 
-	// OpDeleteLocal is reserved for future use (would require explicit tombstones/change log).
+	// OpDeleteLocal deletes a secret from the local side by identity
+	// (project/env/key), prompted by a tombstone on the remote.
+	//
+	// NOTE: This engine only emits OpDeleteLocal when Options.DeleteLocalMissing is true.
 	OpDeleteLocal OperationKind = "delete-local"
 )
 
@@ -194,6 +212,15 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 		return Plan{}, err
 	}
 
+	localTombs, err := e.tombstoneIndex(ctx, e.local, sideLocal, e.opts.Scope, e.opts.Since)
+	if err != nil {
+		return Plan{}, err
+	}
+	remoteTombs, err := e.tombstoneIndex(ctx, e.remote, sideRemote, e.opts.Scope, e.opts.Since)
+	if err != nil {
+		return Plan{}, err
+	}
+
 	plan := Plan{
 		Push:      make([]Operation, 0),
 		Pull:      make([]Operation, 0),
@@ -214,6 +241,22 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 
 		switch {
 		case ls != nil && rs == nil:
+			// Local-only secret.
+			//
+			// If the remote side has a tombstone for this identity, the secret
+			// was deliberately deleted remotely: never push it back. Optionally
+			// mirror the deletion to the local copy with DeleteLocalMissing.
+			if _, deletedRemotely := remoteTombs[id]; deletedRemotely {
+				if e.opts.DeleteLocalMissing {
+					plan.Pull = append(plan.Pull, Operation{
+						Kind:        OpDeleteLocal,
+						ProjectName: id.project,
+						Environment: id.env,
+						Key:         id.key,
+					})
+				}
+				continue
+			}
 			plan.Push = append(plan.Push, Operation{
 				Kind:        OpUpsertRemote,
 				ProjectName: id.project,
@@ -224,6 +267,23 @@ func (e *Engine) SyncPlan(ctx context.Context) (Plan, error) {
 
 		case ls == nil && rs != nil:
 			// Remote-only secret.
+			//
+			// If the local side has a tombstone, the secret was deliberately
+			// deleted locally: never pull it back. Optionally mirror the
+			// deletion to the remote with DeleteRemoteMissing.
+			if _, deletedLocally := localTombs[id]; deletedLocally {
+				if e.opts.DeleteRemoteMissing {
+					plan.Push = append(plan.Push, Operation{
+						Kind:        OpDeleteRemote,
+						ProjectName: id.project,
+						Environment: id.env,
+						Key:         id.key,
+					})
+				}
+				continue
+			}
+
+			// No local tombstone: the local side simply lacks this secret.
 			//
 			// If DeleteRemoteMissing is enabled, interpret remote-only as "should be deleted remotely"
 			// during a push (delete-by-absence). Otherwise, default to pulling it locally.
@@ -459,12 +519,15 @@ func (e *Engine) applyOp(ctx context.Context, op Operation) error {
 		return upsert(ctx, e.remote, e.local, op.ProjectName, op.Environment, op.Key, op.Secret, e.opts.Clock)
 
 	case OpDeleteRemote:
-		// Delete-by-identity on remote.
+		// Delete-by-identity on remote. The remote DeleteSecret records a
+		// tombstone, so a later pull cannot resurrect the secret.
 		return deleteByIdentity(ctx, e.remote, op.ProjectName, op.Environment, op.Key)
 
 	case OpDeleteLocal:
-		// Reserved for future use (would require explicit tombstones/change log).
-		return fmt.Errorf("delete-local is not implemented (requires tombstones/change log)")
+		// Delete-by-identity on local, prompted by a tombstone on the remote.
+		// The local DeleteSecret records a tombstone, so the remote cannot
+		// resurrect the secret on a later push.
+		return deleteByIdentity(ctx, e.local, op.ProjectName, op.Environment, op.Key)
 	default:
 		return fmt.Errorf("unknown operation: %s", op.Kind)
 	}
@@ -537,6 +600,67 @@ func (e *Engine) snapshotIndex(ctx context.Context, b storage.Backend, _ side, s
 
 				id := identity{project: pname, env: s.Environment, key: s.Key}
 				idx[id] = toSnapshot(pname, s)
+			}
+		}
+	}
+
+	return idx, nil
+}
+
+// tombstoneIndex builds the set of identities that have deletion records on the
+// given backend, honoring the same scope and `since` filtering as snapshotIndex.
+func (e *Engine) tombstoneIndex(ctx context.Context, b storage.Backend, _ side, scope Scope, since *time.Time) (map[identity]struct{}, error) {
+	projects, err := b.ListProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	projIDsByName := map[string]string{}
+	for _, p := range projects {
+		projIDsByName[p.Name] = p.ID
+	}
+
+	projectNames := make([]string, 0)
+	if scope.ProjectName != "" {
+		projectNames = append(projectNames, scope.ProjectName)
+	} else {
+		for name := range projIDsByName {
+			projectNames = append(projectNames, name)
+		}
+	}
+
+	idx := make(map[identity]struct{}, 64)
+
+	for _, pname := range projectNames {
+		pid := projIDsByName[pname]
+		if pid == "" {
+			continue
+		}
+
+		envs := make([]string, 0)
+		if scope.EnvironmentName != "" {
+			envs = append(envs, scope.EnvironmentName)
+		} else {
+			list, err := b.ListEnvironments(ctx, pid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list environments for project %q: %w", pname, err)
+			}
+			for _, ev := range list {
+				envs = append(envs, ev.Name)
+			}
+		}
+
+		for _, env := range envs {
+			tombs, err := b.ListTombstones(ctx, pid, env)
+			if err != nil {
+				// Environment likely absent on this side; nothing to delete.
+				continue
+			}
+			for _, t := range tombs {
+				if since != nil && t.DeletedAt.Before(*since) {
+					continue
+				}
+				idx[identity{project: pname, env: env, key: t.Key}] = struct{}{}
 			}
 		}
 	}
@@ -716,7 +840,7 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 		// Record sync bookkeeping on both sides. Destination was just marked
 		// above; this also stamps the source so the next reconciliation knows
 		// this change was already propagated.
-		return markSyncedBoth(ctx, src, dst, projectName, env, key, t)
+		return finishUpsert(ctx, src, dst, projectName, env, key, t)
 	}
 
 	// update existing
@@ -748,7 +872,18 @@ func upsert(ctx context.Context, src storage.Backend, dst storage.Backend, proje
 	}
 
 	// Record sync bookkeeping on both sides (see comment in create path).
-	return markSyncedBoth(ctx, src, dst, projectName, env, key, t)
+	return finishUpsert(ctx, src, dst, projectName, env, key, t)
+}
+
+// finishUpsert records sync bookkeeping on both sides and clears any stale
+// tombstones for the identity. A tombstone is only meaningful while the
+// identity is absent; once a secret exists on both sides again, the deletion
+// record describes an earlier era and must not re-trigger propagation.
+func finishUpsert(ctx context.Context, src, dst storage.Backend, projectName, env, key string, t time.Time) error {
+	if err := markSyncedBoth(ctx, src, dst, projectName, env, key, t); err != nil {
+		return err
+	}
+	return clearTombstonesBoth(ctx, src, dst, projectName, env, key)
 }
 
 // markSyncedBoth stamps sync bookkeeping on both backends with the same
@@ -772,6 +907,21 @@ func markSideSynced(ctx context.Context, backend storage.Backend, projectName, e
 		return nil // secret absent on this side; nothing to mark
 	}
 	return backend.MarkSynced(ctx, s.ID, t)
+}
+
+func clearTombstonesBoth(ctx context.Context, a, b storage.Backend, projectName, env, key string) error {
+	if err := clearSideTombstone(ctx, a, projectName, env, key); err != nil {
+		return err
+	}
+	return clearSideTombstone(ctx, b, projectName, env, key)
+}
+
+func clearSideTombstone(ctx context.Context, backend storage.Backend, projectName, env, key string) error {
+	proj, err := backend.GetProjectByName(ctx, projectName)
+	if err != nil {
+		return nil // nothing to clear on this side
+	}
+	return backend.DeleteTombstone(ctx, proj.ID, env, key)
 }
 
 // changedSince reports whether the snapshot was modified after its last sync.

@@ -28,6 +28,17 @@ type Backend interface {
 	// UpdatedAt, or version history, so it is safe to call as part of a sync
 	// apply without disturbing normal (non-sync) edits.
 	MarkSynced(ctx context.Context, secretID string, syncedAt time.Time) error
+
+	// GetTombstone returns the deletion record for a secret identity, or an
+	// error if no tombstone exists for it.
+	GetTombstone(ctx context.Context, projectID, environment, key string) (*domain.Tombstone, error)
+
+	// ListTombstones lists all deletion records for a project/environment.
+	ListTombstones(ctx context.Context, projectID, environment string) ([]*domain.Tombstone, error)
+
+	// DeleteTombstone removes the deletion record for a secret identity,
+	// typically because the secret was recreated and synced again.
+	DeleteTombstone(ctx context.Context, projectID, environment, key string) error
 	ListSecrets(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	ListSecretMetadata(ctx context.Context, projectID, environment string) ([]*domain.Secret, error)
 	SearchSecrets(ctx context.Context, query string) ([]*domain.Secret, error)
