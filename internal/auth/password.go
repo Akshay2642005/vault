@@ -8,10 +8,16 @@ import (
 	"golang.org/x/term"
 )
 
+// readPassword is the input primitive behind PromptPassword. It is a package
+// variable so tests can substitute a non-TTY source: the real implementation
+// puts the terminal into raw mode and can only read from an interactive
+// terminal, which the test runner does not provide.
+var readPassword = term.ReadPassword
+
 // PromptPassword securely prompts the user for a password with the given prompt message.
 func PromptPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	password, err := readPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
 		return "", fmt.Errorf("failed to read password: %w", err)
