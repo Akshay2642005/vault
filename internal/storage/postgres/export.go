@@ -247,7 +247,7 @@ func (b *Backend) importVault(ctx context.Context, data []byte) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO vault_metadata (id, version, salt, auth_hash, created_at, updated_at)
 		VALUES (1, $1, $2, $3, $4, $5)
-	`, dump.SchemaVersion, dump.Salt, dump.AuthHash, dump.CreatedAt, dump.UpdatedAt); err != nil {
+	`, dump.SchemaVersion, dump.Salt, dump.AuthHash, utc(dump.CreatedAt), utc(dump.UpdatedAt)); err != nil {
 		return fmt.Errorf("failed to insert vault metadata: %w", err)
 	}
 
@@ -256,7 +256,7 @@ func (b *Backend) importVault(ctx context.Context, data []byte) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO projects (id, name, description, config, created_at, created_by, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, p.ID, p.Name, p.Description, p.Config, p.CreatedAt, p.CreatedBy, p.UpdatedAt); err != nil {
+		`, p.ID, p.Name, p.Description, p.Config, utc(p.CreatedAt), p.CreatedBy, utc(p.UpdatedAt)); err != nil {
 			return fmt.Errorf("failed to insert project %s: %w", p.Name, err)
 		}
 
@@ -278,8 +278,8 @@ func (b *Backend) importVault(ctx context.Context, data []byte) error {
 					expires_at, rotate_at, owner, checksum, sync_status
 				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 			`, s.ID, p.ID, s.Environment, s.Key, []byte(s.Value), s.Type, s.Tags, s.Metadata,
-				s.Version, s.CreatedAt, s.CreatedBy, s.UpdatedAt, s.UpdatedBy,
-				s.ExpiresAt, s.RotateAt, s.Owner, s.Checksum, s.SyncStatus); err != nil {
+				s.Version, utc(s.CreatedAt), s.CreatedBy, utc(s.UpdatedAt), s.UpdatedBy,
+				utcPtr(s.ExpiresAt), utcPtr(s.RotateAt), s.Owner, s.Checksum, s.SyncStatus); err != nil {
 				return fmt.Errorf("failed to insert secret %s/%s: %w", s.Environment, s.Key, err)
 			}
 		}
@@ -290,7 +290,7 @@ func (b *Backend) importVault(ctx context.Context, data []byte) error {
 				if _, err := tx.ExecContext(ctx, `
 					INSERT INTO secret_versions (id, secret_id, value, version, created_at, created_by, checksum)
 					VALUES ($1, $2, $3, $4, $5, $6, $7)
-				`, v.ID, s.ID, []byte(v.Value), v.Version, v.CreatedAt, v.CreatedBy, v.Checksum); err != nil {
+				`, v.ID, s.ID, []byte(v.Value), v.Version, utc(v.CreatedAt), v.CreatedBy, v.Checksum); err != nil {
 					return fmt.Errorf("failed to insert version %d of %s: %w", v.Version, s.Key, err)
 				}
 			}

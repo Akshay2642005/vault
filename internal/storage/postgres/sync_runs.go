@@ -12,7 +12,7 @@ func (b *Backend) RecordSyncRun(ctx context.Context, run *domain.SyncRun) error 
 	_, err := b.db.ExecContext(ctx, `
 		INSERT INTO sync_runs (id, started_at, finished_at, direction, strategy, scope, status, dry_run, pushed, pulled, conflicts, error)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`, run.ID, run.StartedAt, run.FinishedAt, run.Direction, run.Strategy, run.Scope,
+	`, run.ID, utc(run.StartedAt), utc(run.FinishedAt), run.Direction, run.Strategy, run.Scope,
 		run.Status, run.DryRun, run.Pushed, run.Pulled, run.Conflicts, run.Error)
 	if err != nil {
 		return fmt.Errorf("failed to record sync run: %w", err)

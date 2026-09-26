@@ -95,7 +95,7 @@ func (b *Backend) CreateVault(ctx context.Context, password string) error {
 	_, err = b.db.ExecContext(ctx, `
 		INSERT INTO vault_metadata (id, version, salt, auth_hash, created_at, updated_at)
 		VALUES (1, $1, $2, $3, $4, $5)
-	`, schemaVersion, base64.StdEncoding.EncodeToString(salt), authHash, time.Now(), time.Now())
+	`, schemaVersion, base64.StdEncoding.EncodeToString(salt), authHash, utc(time.Now()), utc(time.Now()))
 
 	if err != nil {
 		return fmt.Errorf("failed to store vault metadata: %w", err)
@@ -231,7 +231,7 @@ func (b *Backend) applyMigration(ctx context.Context, migration Migration) error
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO schema_version (version, description, applied_at)
 		VALUES ($1, $2, $3)
-	`, migration.Version, migration.Description, time.Now())
+	`, migration.Version, migration.Description, utc(time.Now()))
 
 	if err != nil {
 		return err

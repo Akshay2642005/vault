@@ -51,9 +51,9 @@ func (b *Backend) CreateSecret(ctx context.Context, secret *domain.Secret) error
 	`,
 		secret.ID, secret.ProjectID, secret.Environment, secret.Key,
 		encryptedValue, secret.Type, tags, metadata,
-		secret.Version, secret.CreatedAt, secret.CreatedBy,
-		secret.UpdatedAt, secret.UpdatedBy,
-		secret.ExpiresAt, secret.RotateAt, secret.Owner,
+		secret.Version, utc(secret.CreatedAt), secret.CreatedBy,
+		utc(secret.UpdatedAt), secret.UpdatedBy,
+		utcPtr(secret.ExpiresAt), utcPtr(secret.RotateAt), secret.Owner,
 		secret.Checksum, secret.SyncStatus,
 	)
 
@@ -248,9 +248,9 @@ func (b *Backend) UpdateSecret(ctx context.Context, secret *domain.Secret) error
 		WHERE id = $12
 	`,
 		encryptedValue, secret.Type, tags, metadata,
-		secret.UpdatedAt, secret.UpdatedBy,
-		secret.ExpiresAt, secret.RotateAt, secret.Checksum,
-		secret.SyncStatus, secret.LastSyncedAt,
+		utc(secret.UpdatedAt), secret.UpdatedBy,
+		utcPtr(secret.ExpiresAt), utcPtr(secret.RotateAt), secret.Checksum,
+		secret.SyncStatus, utcPtr(secret.LastSyncedAt),
 		secret.ID,
 	)
 
@@ -269,7 +269,7 @@ func (b *Backend) MarkSynced(ctx context.Context, secretID string, syncedAt time
 			sync_status = $1,
 			last_synced_at = $2
 		WHERE id = $3
-	`, domain.SyncStatusInSync, syncedAt, secretID)
+	`, domain.SyncStatusInSync, utc(syncedAt), secretID)
 	if err != nil {
 		return fmt.Errorf("failed to mark secret synced: %w", err)
 	}
@@ -306,7 +306,7 @@ func (b *Backend) DeleteSecret(ctx context.Context, id string) error {
 			checksum = excluded.checksum,
 			deleted_at = excluded.deleted_at,
 			deleted_by = excluded.deleted_by
-	`, domain.GenerateID(), projectID, environment, key, checksum, time.Now(), deletedBy); err != nil {
+	`, domain.GenerateID(), projectID, environment, key, checksum, utc(time.Now()), deletedBy); err != nil {
 		return fmt.Errorf("failed to record tombstone: %w", err)
 	}
 
@@ -575,7 +575,7 @@ func (b *Backend) CreateSecretVersion(ctx context.Context, version *domain.Secre
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`,
 		version.ID, version.SecretID, encryptedValue,
-		version.Version, version.CreatedAt, version.CreatedBy,
+		version.Version, utc(version.CreatedAt), version.CreatedBy,
 		version.Checksum,
 	)
 
@@ -678,7 +678,7 @@ func (b *Backend) CreateProject(ctx context.Context, project *domain.Project) er
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`,
 		project.ID, project.Name, project.Description, config,
-		project.CreatedAt, project.CreatedBy, project.UpdatedAt,
+		utc(project.CreatedAt), project.CreatedBy, utc(project.UpdatedAt),
 	)
 
 	if err != nil {
@@ -824,7 +824,7 @@ func (b *Backend) UpdateProject(ctx context.Context, project *domain.Project) er
 		WHERE id = $5
 	`,
 		project.Name, project.Description, configJSON,
-		project.UpdatedAt, project.ID,
+		utc(project.UpdatedAt), project.ID,
 	)
 
 	if err != nil {
