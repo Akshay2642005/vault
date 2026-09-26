@@ -370,6 +370,42 @@ CREATE INDEX IF NOT EXISTS idx_secrets_key_gin ON secrets USING gin(to_tsvector(
 CREATE INDEX IF NOT EXISTS idx_secrets_tags_gin ON secrets USING gin(to_tsvector('english', COALESCE(tags, '')));
 `,
 	},
+	{
+		Version:     2,
+		Description: "Add sync schema: secret_tombstones and sync_runs (heals vaults that recorded v1 before these tables existed)",
+		SQL: `
+-- Secret tombstones (deletion records for sync propagation)
+CREATE TABLE IF NOT EXISTS secret_tombstones (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	environment TEXT NOT NULL,
+	key TEXT NOT NULL,
+	checksum TEXT,
+	deleted_at TIMESTAMP NOT NULL,
+	deleted_by TEXT,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	UNIQUE(project_id, environment, key)
+);
+
+-- Sync run history (observability, metadata only)
+CREATE TABLE IF NOT EXISTS sync_runs (
+	id TEXT PRIMARY KEY,
+	started_at TIMESTAMP NOT NULL,
+	finished_at TIMESTAMP NOT NULL,
+	direction TEXT NOT NULL,
+	strategy TEXT NOT NULL,
+	scope TEXT,
+	status TEXT NOT NULL,
+	dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+	pushed INTEGER NOT NULL DEFAULT 0,
+	pulled INTEGER NOT NULL DEFAULT 0,
+	conflicts INTEGER NOT NULL DEFAULT 0,
+	error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON sync_runs(started_at DESC);
+`,
+	},
 }
 
 // BeginTx starts a transaction
